@@ -1,0 +1,259 @@
+/**
+ * Global styles for Maintenance Work Orders.
+ *
+ * Zenith ships its design tokens via @geotab/zenith/dist/index.css. Anything
+ * below layers GPSFMS-specific page chrome on top (same vocabulary as the
+ * other GPSFMS add-ins). Lean on Zenith primitives first — only add custom
+ * CSS where Zenith doesn't already cover it.
+ */
+
+@import "@geotab/zenith/dist/index.css";
+
+:root {
+  --gpsfms-navy: #25477b;
+  --gpsfms-dark: #1c2b39;
+  --gpsfms-blue: #0084c2;
+  --gpsfms-blue-soft: #e5f1f8;
+  --gpsfms-light: #f4f4f4;
+}
+
+html, body, #root { margin: 0; padding: 0; height: 100%; }
+#root { display: flex; flex-direction: column; }
+
+.mwo-page {
+  font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--gpsfms-dark);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.mwo-page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.mwo-page-header h2 { margin: 0; font-size: 20px; color: var(--gpsfms-dark); }
+.mwo-page-header p { margin: 4px 0 0; color: #6b7280; font-size: 13px; max-width: 860px; }
+.mwo-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mwo-groups-picker { min-width: 220px; }
+
+.mwo-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.mwo-toolbar > * { min-width: 0; }
+.mwo-spacer { flex: 1; }
+.mwo-muted { color: #6b7280; font-size: 13px; }
+.mwo-small { font-size: 12px; }
+.mwo-strong { font-weight: 600; white-space: nowrap; }
+.mwo-link { background: none; border: 0; padding: 0; color: var(--gpsfms-blue); font: inherit; font-size: 13px; cursor: pointer; }
+.mwo-link:hover { text-decoration: underline; }
+.mwo-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--gpsfms-dark); cursor: pointer; }
+
+/* ---- Banners / progress ---- */
+.mwo-banners { display: flex; flex-direction: column; gap: 8px; }
+.mwo-banners:empty { display: none; }
+.mwo-progress {
+  background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af;
+  padding: 8px 12px; border-radius: 4px; font-size: 13px;
+  display: flex; align-items: center; gap: 10px;
+}
+.mwo-progress-bar { flex: 1; min-width: 160px; }
+
+/* ---- Summary ---- */
+.mwo-tile-value { font-size: 22px; font-weight: 600; color: var(--gpsfms-dark); }
+.mwo-tile-warn { color: #991b1b; }
+.mwo-tile-info { color: #92400e; }
+.mwo-tile-ok { color: #166534; }
+.mwo-tile-blue { color: var(--gpsfms-navy); }
+.mwo-tile-muted { color: #6b7280; }
+
+/* ---- Cards / settings ---- */
+.mwo-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px 16px; }
+.mwo-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.mwo-card-head h3 { margin: 0; font-size: 15px; }
+.mwo-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; align-items: start; }
+
+/* ---- Tables ---- */
+.mwo-table-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; overflow-x: auto; }
+.mwo-busy { opacity: 0.6; pointer-events: none; }
+.mwo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mwo-table th, .mwo-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+.mwo-table th {
+  background: #f3f4f6; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #4b5563; white-space: nowrap; position: sticky; top: 0; z-index: 1; user-select: none;
+}
+.mwo-table th.mwo-sortable { cursor: pointer; }
+.mwo-table th.mwo-sortable:hover { background: #e5e7eb; }
+.mwo-table th.mwo-sorted { color: var(--gpsfms-navy); }
+.mwo-sort-arrow { margin-left: 4px; font-size: 9px; }
+.mwo-table tr:last-child td { border-bottom: 0; }
+.mwo-table .mwo-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mwo-table .mwo-nowrap { white-space: nowrap; }
+.mwo-row { cursor: pointer; }
+.mwo-row:hover td { background: #f9fafb; }
+.mwo-row-critical td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
+.mwo-row-high td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+.mwo-row-done td { color: #6b7280; }
+.mwo-asset { white-space: nowrap; font-weight: 600; }
+.mwo-asset a { color: var(--gpsfms-blue); text-decoration: none; }
+.mwo-asset a:hover { text-decoration: underline; }
+.mwo-title { font-weight: 600; }
+.mwo-title-sub { display: block; color: #6b7280; font-size: 12px; font-weight: 400; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mwo-cell-actions { white-space: nowrap; }
+.mwo-wo-number { font-variant-numeric: tabular-nums; color: var(--gpsfms-navy); font-weight: 600; white-space: nowrap; }
+
+.mwo-pill {
+  display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.02em; white-space: nowrap; background: var(--gpsfms-blue-soft); color: var(--gpsfms-navy);
+}
+.mwo-pill + .mwo-pill { margin-left: 4px; }
+.mwo-pill-ok { background: #dcfce7; color: #166534; }
+.mwo-pill-warn { background: #fee2e2; color: #991b1b; }
+.mwo-pill-info { background: #fef3c7; color: #92400e; }
+.mwo-pill-muted { background: #f3f4f6; color: #4b5563; }
+.mwo-pill-purple { background: #ede9fe; color: #5b21b6; }
+
+.mwo-empty { padding: 24px; text-align: center; color: #6b7280; background: #f9fafb; border: 1px dashed #e5e7eb; border-radius: 6px; }
+.mwo-table-foot { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-top: 1px solid #e5e7eb; background: #f9fafb; font-size: 13px; }
+.mwo-error { display: flex; flex-direction: column; gap: 6px; }
+.mwo-error code { font-size: 12px; }
+.mwo-error pre { margin: 0; font-size: 11px; white-space: pre-wrap; color: #6b7280; max-height: 120px; overflow: auto; }
+
+/* ---- Side panel forms ---- */
+/* Zenith caps side panels at 37.5rem; our editors want more room. */
+.zen-side-panel.mwo-side-panel { max-width: 900px; }
+@media (max-width: 1024px), (pointer: coarse) and (max-width: 1400px) {
+  .zen-side-panel.mwo-side-panel { width: 100% !important; min-width: 100%; max-width: 100%; border-radius: 0; }
+}
+.mwo-panel { display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
+.mwo-panel h4 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #4b5563; }
+.mwo-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.mwo-form-grid .mwo-span-2 { grid-column: span 2; }
+@media (max-width: 720px) { .mwo-form-grid { grid-template-columns: 1fr; } .mwo-form-grid .mwo-span-2 { grid-column: span 1; } }
+.mwo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mwo-field-label { font-size: 12px; color: #4b5563; font-weight: 500; }
+.mwo-input {
+  font: inherit; font-size: 14px; color: var(--gpsfms-dark);
+  border: 1px solid #c3c8cf; border-radius: 4px; padding: 7px 10px; background: #fff; min-height: 36px; box-sizing: border-box; width: 100%;
+}
+.mwo-input:focus { outline: none; border-color: var(--gpsfms-blue); box-shadow: 0 0 0 3px var(--gpsfms-blue-soft); }
+.mwo-input:disabled { background: #f3f4f6; color: #6b7280; }
+.mwo-input-sm { min-height: 30px; padding: 4px 8px; font-size: 13px; }
+.mwo-panel-section { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.mwo-panel-section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mwo-status-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mwo-kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; }
+.mwo-kv dt { color: #6b7280; }
+.mwo-kv dd { margin: 0; }
+
+.mwo-lines { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mwo-lines th { text-align: left; font-size: 11px; text-transform: uppercase; color: #4b5563; padding: 2px 4px; font-weight: 600; }
+.mwo-lines td { padding: 3px 4px; vertical-align: middle; }
+.mwo-lines .mwo-num { text-align: right; }
+.mwo-lines input[type="checkbox"] { width: 16px; height: 16px; }
+.mwo-totals { display: flex; gap: 18px; justify-content: flex-end; font-size: 13px; flex-wrap: wrap; }
+.mwo-totals b { font-variant-numeric: tabular-nums; }
+
+.mwo-activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; max-height: 200px; overflow: auto; }
+.mwo-activity li { display: flex; gap: 8px; }
+.mwo-activity time { color: #6b7280; white-space: nowrap; }
+.mwo-panel-footer { display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid #e5e7eb; }
+.mwo-panel-footer-right { display: flex; gap: 8px; }
+
+.mwo-progress-mini { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; min-width: 90px; }
+.mwo-progress-mini > span { display: block; height: 100%; background: var(--gpsfms-blue); }
+.mwo-progress-mini.mwo-over > span { background: #dc2626; }
+.mwo-progress-mini.mwo-soon > span { background: #f59e0b; }
+.mwo-reasons { margin: 0; padding-left: 16px; font-size: 12px; color: #4b5563; }
+
+.mwo-toasts { position: fixed; bottom: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---- Make Zenith form controls fill the form grid ---- */
+.mwo-panel .zen-form-field,
+.mwo-panel .zen-form-field__input-container,
+.mwo-panel .zen-form-field__input-wrapper,
+.mwo-panel .zen-text-input-layout,
+.mwo-panel .zen-text-input,
+.mwo-panel .zen-select,
+.mwo-panel .zen-textarea,
+.mwo-panel textarea.zen-textarea__field { width: 100% !important; max-width: none !important; box-sizing: border-box; }
+.mwo-panel .zen-select__trigger { width: 100%; }
+.mwo-lines { table-layout: fixed; }
+.mwo-lines td input, .mwo-lines td select { width: 100%; box-sizing: border-box; min-width: 0; }
+.mwo-lines .mwo-input-sm { padding-left: 6px; padding-right: 6px; }
+
+/* =========================================================================
+   iPad / MyGeotab mobile app (webview 768–1024 px, touch)
+   ========================================================================= */
+
+/* Tabs and toolbars scroll sideways instead of wrapping into a tall stack. */
+.mwo-tabs-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.mwo-tabs-scroll::-webkit-scrollbar { display: none; }
+
+/* Card list (replaces the work-order table on tablets) */
+.mwo-cards-wrap { display: flex; flex-direction: column; gap: 10px; }
+.mwo-cards-sort { display: flex; align-items: center; gap: 10px; }
+.mwo-cards-sort select { width: auto; min-width: 180px; }
+.mwo-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+.mwo-card-row {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+  background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #d1d5db; border-radius: 8px; padding: 12px 14px;
+  font: inherit; color: var(--gpsfms-dark); min-height: 44px; -webkit-tap-highlight-color: transparent;
+}
+.mwo-card-row:active { background: #f3f4f6; }
+.mwo-card-row:focus-visible { outline: 2px solid var(--gpsfms-blue); outline-offset: 2px; }
+.mwo-card-critical { border-left-color: #dc2626; }
+.mwo-card-high { border-left-color: #f59e0b; }
+.mwo-card-row-head { display: flex; align-items: center; gap: 10px; }
+.mwo-card-row-title { font-weight: 600; font-size: 15px; }
+.mwo-card-row-sub { color: #6b7280; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mwo-card-row-sub:empty { display: none; }
+.mwo-card-row-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+
+@media (max-width: 1024px), (pointer: coarse) and (max-width: 1400px) {
+  .mwo-page { padding: 12px; gap: 12px; }
+  .mwo-page-header p { display: none; }
+  .mwo-groups-picker { min-width: 180px; }
+  .mwo-settings-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  /* Editors are full-screen panels: single-column forms, sticky action bar. */
+  .mwo-form-grid { grid-template-columns: 1fr 1fr; }
+  .mwo-panel-footer { position: sticky; bottom: 0; background: #fff; padding: 10px 0; margin-top: 4px; z-index: 2; }
+  /* Line items stack into a small card per line. */
+  .mwo-lines { table-layout: auto; }
+  .mwo-lines thead, .mwo-lines colgroup { display: none; }
+  .mwo-lines, .mwo-lines tbody { display: block; }
+  .mwo-lines tr {
+    display: grid; grid-template-columns: 1fr 1fr 1fr auto; grid-template-areas: "type type type del" "desc desc desc desc" "qty unit total warr";
+    gap: 6px 8px; padding: 8px 0; border-bottom: 1px solid #e5e7eb;
+  }
+  .mwo-lines td { display: block; padding: 0; }
+  .mwo-lines td:nth-child(1) { grid-area: type; }
+  .mwo-lines td:nth-child(2) { grid-area: desc; }
+  .mwo-lines td:nth-child(3) { grid-area: qty; }
+  .mwo-lines td:nth-child(4) { grid-area: unit; }
+  .mwo-lines td:nth-child(5) { grid-area: total; align-self: center; text-align: right; font-weight: 600; }
+  .mwo-lines td:nth-child(6) { grid-area: warr; align-self: center; text-align: right; }
+  .mwo-lines td:nth-child(6)::before { content: "Warranty "; font-size: 12px; color: #4b5563; }
+  .mwo-lines td:nth-child(7) { grid-area: del; text-align: right; }
+  .mwo-lines td:nth-child(3)::before { content: "Qty"; display: block; font-size: 11px; color: #4b5563; text-transform: uppercase; }
+  .mwo-lines td:nth-child(4)::before { content: "Unit cost"; display: block; font-size: 11px; color: #4b5563; text-transform: uppercase; }
+}
+
+@media (max-width: 700px) {
+  .mwo-form-grid { grid-template-columns: 1fr; }
+  .mwo-form-grid .mwo-span-2 { grid-column: span 1; }
+  .mwo-cards { grid-template-columns: 1fr; }
+  .mwo-page-header { flex-direction: column; }
+  .mwo-actions { width: 100%; }
+  .mwo-tile-value { font-size: 18px; }
+}
+
+/* Bigger tap targets whenever the pointer is a finger (iPad, phones). */
+@media (pointer: coarse) {
+  .mwo-page .zen-button, .mwo-page .zen-tab, .mwo-input, .mwo-page .zen-text-input, .mwo-page .zen-select__trigger { min-height: 44px; }
+  .mwo-input-sm { min-height: 40px; }
+  .mwo-link { padding: 10px 6px; min-height: 44px; display: inline-flex; align-items: center; }
+  .mwo-table td { padding: 12px 10px; }
+  .mwo-table th { padding: 10px; }
+  .mwo-lines input[type="checkbox"], .mwo-page input[type="checkbox"] { width: 22px; height: 22px; }
+  .mwo-row:hover td { background: inherit; }
+  .mwo-row:active td { background: #f3f4f6; }
+}

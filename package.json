@@ -1,0 +1,28 @@
+{
+  "name": "maintenance-work-orders-addin",
+  "version": "1.0.0",
+  "description": "GPSFMS Maintenance Work Orders — MyGeotab add-in (work orders, assignment, warranty coverage + claims, stored in AddInData)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/run.mjs",
+    "smoke": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@geotab/zenith": "^3.9.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

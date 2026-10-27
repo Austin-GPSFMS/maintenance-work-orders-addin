@@ -1,0 +1,15 @@
+{
+  "name": "Maintenance Work Orders",
+  "supportEmail": "support@gpsfms.com",
+  "version": "1.0.0",
+  "items": [
+    {
+      "url": "https://austin-gpsfms.github.io/maintenance-work-orders-addin/dist/index.html",
+      "path": "AdministrationLink/",
+      "menuName": {
+        "en": "Maintenance Work Orders"
+      }
+    }
+  ],
+  "isSigned": false
+}
