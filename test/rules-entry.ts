@@ -4,3 +4,6 @@ export { ADDIN_DATA_ID } from "../src/api/store";
 export * from "../src/utils/warranty";
 export * from "../src/utils/workorders";
 export * from "../src/utils/format";
+export * from "../src/utils/geotabMerge";
+export { normalizeSchedule, normalizeJob, isUserReminder, timeSpanToSeconds, secondsToTimeSpan, composeNotes, splitNotes, NOTES_MARKER } from "../src/api/maintenanceCenter";
+export { DEFAULT_SETTINGS } from "../src/utils/storage";

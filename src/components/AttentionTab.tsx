@@ -4,9 +4,9 @@
  */
 
 import { Banner, Button, Tabs } from "@geotab/zenith";
-import type { DvirDefectItem, FaultItem, GeotabSession, ScheduleEvaluation, ServiceSchedule, Settings, WorkOrder } from "../types";
+import type { DvirDefectItem, FaultItem, GeotabSession, ReminderVehicleRow, ScheduleEvaluation, Settings, WorkOrder } from "../types";
 import { formatDateTime } from "../utils/format";
-import { formatNumber } from "../utils/workorders";
+import { formatNumber, woKey } from "../utils/workorders";
 import { vehicleLink } from "./WorkOrderTable";
 
 export type AttentionView = "dvir" | "faults" | "due";
@@ -16,17 +16,17 @@ interface Props {
   onView: (v: AttentionView) => void;
   dvir: DvirDefectItem[] | null;
   faults: FaultItem[] | null;
-  due: Array<{ schedule: ServiceSchedule; evaluation: ScheduleEvaluation }>;
+  due: ReminderVehicleRow[];
   loading: boolean;
   error: string | null;
   settings: Settings;
   session: GeotabSession | null;
   insideMyGeotab: boolean;
   onRefresh: () => void;
-  onOpenWorkOrder: (number: number) => void;
+  onOpenWorkOrder: (key: string) => void;
   onCreateFromDvir: (item: DvirDefectItem) => void;
   onCreateFromFault: (item: FaultItem) => void;
-  onCreateFromSchedule: (s: ServiceSchedule) => void;
+  onCreateFromReminder: (row: ReminderVehicleRow) => void;
   workOrders: WorkOrder[];
 }
 
@@ -36,14 +36,17 @@ function Asset({ session, id, name }: { session: GeotabSession | null; id: strin
 }
 
 export function AttentionTab(props: Props) {
-  const { view, onView, dvir, faults, due, loading, error, settings, session, onRefresh, onOpenWorkOrder, onCreateFromDvir, onCreateFromFault, onCreateFromSchedule } = props;
+  const { view, onView, dvir, faults, due, loading, error, settings, session, onRefresh, onOpenWorkOrder, onCreateFromDvir, onCreateFromFault, onCreateFromReminder, workOrders } = props;
 
-  const existingLink = (n: number | null) =>
-    n != null ? (
-      <button className="mwo-link" onClick={() => onOpenWorkOrder(n)}>
-        {formatNumber(n)}
+  const existingLink = (key: string | null) => {
+    if (!key) return null;
+    const wo = workOrders.find((w) => woKey(w) === key);
+    return (
+      <button className="mwo-link" onClick={() => onOpenWorkOrder(key)}>
+        {wo ? formatNumber(wo) : "Open order"}
       </button>
-    ) : null;
+    );
+  };
 
   const overdueCount = due.filter((d) => d.evaluation.state === "overdue").length;
   const dueSoonCount = due.filter((d) => d.evaluation.state === "due_soon").length;
@@ -56,7 +59,7 @@ export function AttentionTab(props: Props) {
           tabs={[
             { id: "dvir", name: "DVIR defects", quantity: dvir?.length ?? 0 },
             { id: "faults", name: "Active faults", quantity: faults?.length ?? 0 },
-            { id: "due", name: "Service due", quantity: overdueCount + dueSoonCount },
+            { id: "due", name: "Reminders due", quantity: overdueCount + dueSoonCount },
           ]}
           activeTabId={view}
           onTabChange={(id) => onView(id as AttentionView)}
@@ -64,7 +67,7 @@ export function AttentionTab(props: Props) {
         </div>
         <div className="mwo-actions">
           <span className="mwo-muted mwo-small">
-            {view === "dvir" ? `Unrepaired defects from DVIRs in the last ${settings.dvirLookbackDays} days` : view === "faults" ? `Latest active, undismissed fault per vehicle & code in the last ${settings.faultLookbackDays} days` : "From the add-in's service schedules against each vehicle's current odometer / hours"}
+            {view === "dvir" ? `Unrepaired defects from DVIRs in the last ${settings.dvirLookbackDays} days` : view === "faults" ? `Latest active, undismissed fault per vehicle & code in the last ${settings.faultLookbackDays} days` : "Reminders that are overdue or due soon against each vehicle's current odometer / hours"}
           </span>
           <Button type="secondary" onClick={onRefresh} disabled={loading}>
             {loading ? "Loading…" : "Refresh"}
@@ -111,8 +114,8 @@ export function AttentionTab(props: Props) {
                     <td>{d.driverName || <span className="mwo-muted">—</span>}</td>
                     <td>{d.isSafeToOperate == null ? <span className="mwo-muted">—</span> : d.isSafeToOperate ? <span className="mwo-pill mwo-pill-ok">Yes</span> : <span className="mwo-pill mwo-pill-warn">No</span>}</td>
                     <td className="mwo-cell-actions">
-                      {d.openWorkOrderNumber != null ? (
-                        existingLink(d.openWorkOrderNumber)
+                      {d.openWorkOrderKey ? (
+                        existingLink(d.openWorkOrderKey)
                       ) : (
                         <Button type="tertiary" onClick={() => onCreateFromDvir(d)}>
                           Create work order
@@ -167,8 +170,8 @@ export function AttentionTab(props: Props) {
                     <td className="mwo-num">{f.count}</td>
                     <td>{f.severity || <span className="mwo-muted">—</span>}</td>
                     <td className="mwo-cell-actions">
-                      {f.openWorkOrderNumber != null ? (
-                        existingLink(f.openWorkOrderNumber)
+                      {f.openWorkOrderKey ? (
+                        existingLink(f.openWorkOrderKey)
                       ) : (
                         <Button type="tertiary" onClick={() => onCreateFromFault(f)}>
                           Create work order
@@ -185,14 +188,14 @@ export function AttentionTab(props: Props) {
 
       {view === "due" ? (
         due.length === 0 ? (
-          <div className="mwo-empty">No service schedules yet — add them on the Service schedules tab.</div>
+          <div className="mwo-empty">Nothing overdue or due soon on MyGeotab's reminders for the selected groups.</div>
         ) : (
           <div className={`mwo-table-wrap ${loading ? "mwo-busy" : ""}`}>
             <table className="mwo-table">
               <thead>
                 <tr>
                   <th>Vehicle</th>
-                  <th>Service</th>
+                  <th>Reminder</th>
                   <th>Status</th>
                   <th>Progress</th>
                   <th>Why</th>
@@ -200,30 +203,33 @@ export function AttentionTab(props: Props) {
                 </tr>
               </thead>
               <tbody>
-                {due.map(({ schedule: s, evaluation: ev }) => (
-                  <tr key={s.id} className={ev.state === "overdue" ? "mwo-row-critical" : ev.state === "due_soon" ? "mwo-row-high" : ""}>
+                {due.map((r) => (
+                  <tr key={r.key} className={r.evaluation.state === "overdue" ? "mwo-row-critical" : r.evaluation.state === "due_soon" ? "mwo-row-high" : ""}>
                     <td>
-                      <Asset session={session} id={s.deviceId} name={s.deviceName} />
-                    </td>
-                    <td className="mwo-title">{s.name}</td>
-                    <td>
-                      <DuePill state={ev.state} />
+                      <Asset session={session} id={r.deviceId} name={r.deviceName} />
                     </td>
                     <td>
-                      <ProgressMini progress={ev.progress} state={ev.state} />
+                      <span className="mwo-title">{r.rule.name}</span>
+                      <span className="mwo-title-sub">{r.lastDone?.at ? `Last done ${formatDateTime(r.lastDone.at)}` : "No completed service on record"}</span>
+                    </td>
+                    <td>
+                      <DuePill state={r.evaluation.state} />
+                    </td>
+                    <td>
+                      <ProgressMini progress={r.evaluation.progress} state={r.evaluation.state} />
                     </td>
                     <td>
                       <ul className="mwo-reasons">
-                        {ev.reasons.map((r, i) => (
-                          <li key={i}>{r}</li>
+                        {r.evaluation.reasons.map((x, i) => (
+                          <li key={i}>{x}</li>
                         ))}
                       </ul>
                     </td>
                     <td className="mwo-cell-actions">
-                      {ev.openWorkOrderNumber != null ? (
-                        existingLink(ev.openWorkOrderNumber)
+                      {r.openWorkOrderId ? (
+                        existingLink(r.openWorkOrderId)
                       ) : (
-                        <Button type="tertiary" onClick={() => onCreateFromSchedule(s)}>
+                        <Button type="tertiary" onClick={() => onCreateFromReminder(r)}>
                           Create work order
                         </Button>
                       )}

@@ -8,7 +8,7 @@ import { Button, SearchInput, SidePanel, SidePanelCloseReason } from "@geotab/ze
 import type { CoverageEvaluation, CoverageType, GeotabDevice, GeotabSession, Settings, VehicleSnapshot, WarrantyCoverage, WorkOrder } from "../types";
 import { formatDate, formatDistance, formatHours, metersToUnit, toDateInputValue, unitToMeters } from "../utils/format";
 import { COVERAGE_TYPE_LABEL, evaluateCoverage } from "../utils/warranty";
-import { formatNumber, totals } from "../utils/workorders";
+import { formatNumber, totals, woKey } from "../utils/workorders";
 import { DateField, NumberField, SelectField, TextAreaField, TextField } from "./fields";
 import { VehiclePicker } from "./VehiclePicker";
 import { panelWidth, useViewport } from "../utils/viewport";
@@ -25,7 +25,7 @@ interface Props {
   busy: boolean;
   onNew: () => void;
   onEdit: (c: WarrantyCoverage) => void;
-  onOpenWorkOrder: (n: number) => void;
+  onOpenWorkOrder: (key: string) => void;
 }
 
 export function CoveragePill({ state }: { state: CoverageEvaluation["state"] }) {
@@ -130,8 +130,8 @@ export function WarrantyTab({ coverages, workOrders, snapshots, settings, sessio
                       {claims.length ? (
                         <span>
                           {claims.map((w) => (
-                            <button key={w.id} className="mwo-link" style={{ marginRight: 6 }} onClick={(e) => { e.stopPropagation(); onOpenWorkOrder(w.number); }} title={`${w.title} — ${formatMoney(totals(w).warranty, settings.currency)} warranty`}>
-                              {formatNumber(w.number)}
+                            <button key={w.id} className="mwo-link" style={{ marginRight: 6 }} onClick={(e) => { e.stopPropagation(); onOpenWorkOrder(woKey(w)); }} title={`${w.title} — ${formatMoney(totals(w).warranty, settings.currency)} warranty`}>
+                              {formatNumber(w)}
                             </button>
                           ))}
                           {recovered ? <span className="mwo-title-sub">{formatMoney(recovered, settings.currency)} recovered</span> : null}

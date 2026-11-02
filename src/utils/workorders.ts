@@ -8,7 +8,7 @@ import type {
   FaultItem,
   LineItem,
   LineType,
-  ServiceSchedule,
+  ReminderRule,
   Settings,
   VehicleSnapshot,
   WarrantyCoverage,
@@ -68,8 +68,17 @@ export const CLAIM_STATUS_LABEL: Record<ClaimStatus, string> = {
 };
 export const CLAIM_ORDER: ClaimStatus[] = ["none", "pending", "submitted", "approved", "denied", "paid"];
 
-export function formatNumber(n: number): string {
-  return `WO-${String(n).padStart(5, "0")}`;
+/** Display number: Geotab's reference when the order is linked, else the add-in's own counter. */
+export function formatNumber(wo: WorkOrder | number): string {
+  if (typeof wo === "number") return `WO-${String(wo).padStart(5, "0")}`;
+  if (wo.geotab?.reference) return `#${wo.geotab.reference}`;
+  if (wo.number > 0) return `WO-${String(wo.number).padStart(5, "0")}`;
+  return "#new";
+}
+
+/** Stable key for an order across the Geotab / AddInData split. */
+export function woKey(wo: WorkOrder): string {
+  return wo.geotab?.id ?? wo.id ?? `n${wo.number}`;
 }
 
 export function nextNumber(existing: WorkOrder[]): number {
@@ -156,6 +165,7 @@ export function createWorkOrder(input: NewWorkOrderInput): WorkOrder {
       claim: { status: "none", claimNumber: "", submittedAt: null, resolvedAt: null, amountClaimed: null, amountRecovered: null, notes: "" },
     },
     activity: [{ at: iso, by: input.by, text: "Created" }],
+    geotab: null,
   };
   return applyWarrantyEligibility(wo, input.coverages, input.snapshot, input.settings, now);
 }
@@ -172,6 +182,7 @@ export function applyWarrantyEligibility(
   const eligible = active.length > 0;
   const stillValid = wo.warranty.coverageId && active.some((a) => a.coverage.id === wo.warranty.coverageId);
   const pick = stillValid ? active.find((a) => a.coverage.id === wo.warranty.coverageId)! : active[0];
+  const isWarrantyWork = wo.warranty.claim.status !== "none" ? wo.warranty.isWarrantyWork : eligible;
   return {
     ...wo,
     warranty: {
@@ -179,7 +190,8 @@ export function applyWarrantyEligibility(
       eligible,
       coverageId: pick ? (pick.coverage.id ?? null) : null,
       coverageLabel: pick ? coverageLabel(pick.coverage) : "",
-      isWarrantyWork: wo.warranty.claim.status !== "none" ? wo.warranty.isWarrantyWork : eligible,
+      isWarrantyWork,
+      claim: isWarrantyWork && wo.warranty.claim.status === "none" ? { ...wo.warranty.claim, status: "pending" } : wo.warranty.claim,
     },
   };
 }
@@ -210,14 +222,15 @@ export function fromFault(wo: WorkOrder, item: FaultItem): WorkOrder {
   };
 }
 
-export function fromSchedule(wo: WorkOrder, s: ServiceSchedule): WorkOrder {
+export function fromReminder(wo: WorkOrder, rule: ReminderRule): WorkOrder {
+  const interval = [rule.intervalMeters != null ? "distance" : "", rule.intervalMonths != null ? `${rule.intervalMonths} mo` : "", rule.intervalDays != null ? `${rule.intervalDays} d` : ""].filter(Boolean).join(" / ");
   return {
     ...wo,
-    title: s.name,
-    description: s.notes,
-    category: s.category,
+    title: rule.name,
+    description: interval ? `MyGeotab reminder (${interval}).` : "MyGeotab reminder.",
+    category: "preventive",
     priority: "medium",
-    source: { type: "schedule", refId: s.id, label: `Service schedule — ${s.name}` },
+    source: { type: "schedule", refId: rule.id, maintenanceTypeId: rule.maintenanceTypeId ?? undefined, label: `Reminder — ${rule.name}` },
   };
 }
 
@@ -236,17 +249,6 @@ export function transition(wo: WorkOrder, status: WorkOrderStatus, by: string, s
   }
   if (status !== "completed") next.completedAt = null;
   return next;
-}
-
-/** When a scheduled job completes, roll the schedule's "last done" forward. */
-export function rollSchedule(s: ServiceSchedule, wo: WorkOrder, now = new Date()): ServiceSchedule {
-  return {
-    ...s,
-    lastDoneAt: wo.completedAt ?? now.toISOString(),
-    lastDoneMeters: wo.odometerAtClose ?? wo.odometerAtOpen ?? s.lastDoneMeters,
-    lastDoneEngineSeconds: wo.engineSecondsAtClose ?? wo.engineSecondsAtOpen ?? s.lastDoneEngineSeconds,
-    updatedAt: now.toISOString(),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +291,7 @@ export function matchesView(wo: WorkOrder, view: ViewFilter, now = new Date()): 
 
 export function matchesSearch(wo: WorkOrder, q: string): boolean {
   if (!q) return true;
-  const hay = [formatNumber(wo.number), wo.deviceName, wo.title, wo.description, wo.assigneeName, wo.vendor, wo.invoiceNumber, wo.source.label, wo.warranty.claim.claimNumber]
+  const hay = [formatNumber(wo), wo.geotab?.reference ?? "", wo.deviceName, wo.title, wo.description, wo.assigneeName, wo.vendor, wo.invoiceNumber, wo.source.label, wo.warranty.claim.claimNumber]
     .join(" ")
     .toLowerCase();
   return q
@@ -310,7 +312,7 @@ function csvCell(v: unknown): string {
 
 export function workOrdersCsv(rows: WorkOrder[], settings: Settings): string {
   const head = [
-    "Number", "Vehicle", "Title", "Status", "Priority", "Category", "Assignee", "Vendor", "Invoice", "Source",
+    "Number", "MyGeotab", "Vehicle", "Title", "Status", "Priority", "Category", "Assignee", "Vendor", "Invoice", "Source",
     "Created", "Due", "Started", "Completed", "Odometer at open", "Odometer at close",
     "Warranty eligible", "Warranty work", "Coverage", "Claim status", "Claim #", "Amount claimed", "Amount recovered",
     "Total", "Warranty total", "Fleet total", "Lines", "Description",
@@ -320,7 +322,7 @@ export function workOrdersCsv(rows: WorkOrder[], settings: Settings): string {
     const t = totals(w);
     lines.push(
       [
-        formatNumber(w.number), w.deviceName, w.title, STATUS_LABEL[w.status], PRIORITY_LABEL[w.priority], CATEGORY_LABEL[w.category],
+        formatNumber(w), w.geotab ? "linked" : "not synced", w.deviceName, w.title, STATUS_LABEL[w.status], PRIORITY_LABEL[w.priority], CATEGORY_LABEL[w.category],
         w.assigneeName, w.vendor, w.invoiceNumber, w.source.label,
         formatDateTime(w.createdAt), formatDate(w.dueDate), formatDateTime(w.startedAt), formatDateTime(w.completedAt),
         formatDistance(w.odometerAtOpen, settings.units), formatDistance(w.odometerAtClose, settings.units),

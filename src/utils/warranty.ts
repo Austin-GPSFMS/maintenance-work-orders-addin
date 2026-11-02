@@ -13,7 +13,7 @@ import type {
   WarrantyCoverage,
   WorkOrder,
 } from "../types";
-import { addMonths, daysBetween, formatDistance, formatHours, parseDate, safeIso } from "./format";
+import { addMonths, daysBetween, formatDate, formatDistance, formatHours, formatMoney, parseDate, safeIso } from "./format";
 
 /** Coverage end date: explicit endDate, else startDate + months. */
 export function coverageEndDate(c: WarrantyCoverage): Date | null {
@@ -198,3 +198,61 @@ export function evaluateSchedule(
   if (reasons.length === 0) reasons.push("No interval set");
   return { state, reasons, progress, openWorkOrderNumber };
 }
+
+// ---------------------------------------------------------------------------
+// Warranty line for the MyGeotab work-order notes
+// ---------------------------------------------------------------------------
+
+/**
+ * One or two lines that go into the Geotab work order's notes so the
+ * warranty position is visible to anyone reading the order in Maintenance
+ * Center, e.g.
+ *   Warranty: Powertrain — Peterbilt #W48213 — engine, transmission, axles.
+ *   Covered until Mar 21, 2029 / 150,000 mi / 5,000 h. Claim: To be filed.
+ * Returns "" when the vehicle has no coverage and the order is not flagged
+ * as warranty work.
+ */
+export function warrantyNoteFor(
+  wo: Pick<WorkOrder, "deviceId" | "warranty" | "lines">,
+  coverages: WarrantyCoverage[],
+  snap: VehicleSnapshot | undefined,
+  settings: Pick<Settings, "expiringDays" | "expiringMeters" | "units" | "currency">,
+  now = new Date()
+): string {
+  const picked = wo.warranty.coverageId ? coverages.find((c) => c.id === wo.warranty.coverageId) : undefined;
+  const active = activeCoverages(wo.deviceId, coverages, snap, settings, now);
+  // No live coverage: still mention the latest expired one so the tech knows not to bother claiming.
+  const latest = coverages.filter((c) => c.deviceId === wo.deviceId).sort((a, b) => (coverageEndDate(b)?.getTime() ?? 0) - (coverageEndDate(a)?.getTime() ?? 0))[0];
+  const coverage = picked ?? active[0]?.coverage ?? latest;
+  const lines: string[] = [];
+  if (coverage) {
+    const ev = evaluateCoverage(coverage, snap, settings, now);
+    const what = [COVERAGE_TYPE_LABEL[coverage.type] ?? coverage.type, [coverage.provider, coverage.policyNumber ? `#${coverage.policyNumber}` : ""].filter(Boolean).join(" "), coverage.components].filter((s) => s && s.trim()).join(" — ");
+    const limits: string[] = [];
+    const end = coverageEndDate(coverage);
+    if (end) limits.push(formatDate(end.toISOString()));
+    if (coverage.limitMeters != null) limits.push(formatDistance((coverage.startMeters ?? 0) + coverage.limitMeters, settings.units));
+    if (coverage.limitEngineSeconds != null) limits.push(formatHours((coverage.startEngineSeconds ?? 0) + coverage.limitEngineSeconds));
+    const state = ev.state === "expired" ? "EXPIRED" : ev.state === "expiring" ? "expiring" : ev.state === "not_started" ? "not started" : "";
+    lines.push(`Warranty: ${what}. ${limits.length ? `Covered until ${limits.join(" / ")}` : "Open-ended"}${state ? ` (${state})` : ""}.`);
+  } else if (!wo.warranty.isWarrantyWork) {
+    return "";
+  } else {
+    lines.push(`Warranty: ${wo.warranty.coverageLabel || "no coverage on record"}.`);
+  }
+  if (wo.warranty.isWarrantyWork) {
+    const c = wo.warranty.claim;
+    const bits = [`Claim: ${CLAIM_LABEL[c.status] ?? c.status}`];
+    if (c.claimNumber) bits.push(`#${c.claimNumber}`);
+    if (c.amountClaimed != null) bits.push(`${formatMoney(c.amountClaimed, settings.currency)} claimed`);
+    if (c.amountRecovered != null) bits.push(`${formatMoney(c.amountRecovered, settings.currency)} recovered`);
+    const warrantyLines = wo.lines.filter((l) => l.warranty);
+    if (warrantyLines.length) bits.push(`${warrantyLines.length} of ${wo.lines.length} line${wo.lines.length === 1 ? "" : "s"} billed to warranty`);
+    lines.push(bits.join(" · ") + ".");
+  } else {
+    lines.push("Not claimed on this order.");
+  }
+  return lines.join("\n");
+}
+
+const CLAIM_LABEL: Record<string, string> = { none: "none", pending: "To be filed", submitted: "Submitted", approved: "Approved", denied: "Denied", paid: "Paid" };

@@ -14,6 +14,8 @@ interface Props {
   settings: Settings;
   session: GeotabSession | null;
   busy: boolean;
+  /** Maintenance Center sync on → flag orders that have not been written there. */
+  syncOn: boolean;
   onOpen: (wo: WorkOrder) => void;
 }
 
@@ -49,7 +51,7 @@ export function WarrantyPill({ wo }: { wo: WorkOrder }) {
   return null;
 }
 
-export function WorkOrderTable({ rows, settings, session, busy, onOpen }: Props) {
+export function WorkOrderTable({ rows, settings, session, busy, syncOn, onOpen }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("updated");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [limit, setLimit] = useState(PAGE);
@@ -162,7 +164,8 @@ export function WorkOrderTable({ rows, settings, session, busy, onOpen }: Props)
                 onClick={() => onOpen(w)}
               >
                 <div className="mwo-card-row-head">
-                  <span className="mwo-wo-number">{formatNumber(w.number)}</span>
+                  <span className="mwo-wo-number">{formatNumber(w)}</span>
+                  {!w.geotab && syncOn ? <span className="mwo-pill mwo-pill-info">unsynced</span> : null}
                   <span className="mwo-asset">{w.deviceName}</span>
                   <span className="mwo-spacer" />
                   <StatusPill wo={w} />
@@ -215,7 +218,10 @@ export function WorkOrderTable({ rows, settings, session, busy, onOpen }: Props)
                 className={`mwo-row ${w.priority === "critical" ? "mwo-row-critical" : w.priority === "high" ? "mwo-row-high" : ""} ${w.status === "completed" || w.status === "cancelled" ? "mwo-row-done" : ""}`}
                 onClick={() => onOpen(w)}
               >
-                <td className="mwo-wo-number">{formatNumber(w.number)}</td>
+                <td className="mwo-wo-number">
+                  {formatNumber(w)}
+                  {!w.geotab && syncOn ? <span className="mwo-pill mwo-pill-info mwo-pill-small" title="Not yet written to MyGeotab's Maintenance Center — open and save to sync">unsynced</span> : null}
+                </td>
                 <td className="mwo-asset">
                   {link ? (
                     <a href={link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>

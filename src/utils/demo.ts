@@ -8,8 +8,10 @@ import type {
   FaultItem,
   GeotabDevice,
   GeotabGroup,
+  GeotabMaintenanceJob,
+  GeotabMaintenanceSchedule,
+  GeotabMaintenanceWorkOrder,
   GeotabUser,
-  ServiceSchedule,
   StoreData,
   VehicleSnapshot,
   WarrantyCoverage,
@@ -37,6 +39,10 @@ export interface DemoFleet {
   store: StoreData;
   dvir: DvirDefectItem[];
   faults: FaultItem[];
+  /** Raw Maintenance Center objects, exactly as MyGeotab would return them. */
+  geotabSchedules: GeotabMaintenanceSchedule[];
+  geotabWorkOrders: GeotabMaintenanceWorkOrder[];
+  geotabJobs: GeotabMaintenanceJob[];
 }
 
 export function makeDemoFleet(size = 36, seed = 7, now = new Date()): DemoFleet {
@@ -108,29 +114,61 @@ export function makeDemoFleet(size = 36, seed = 7, now = new Date()): DemoFleet 
     });
   }
 
-  // Service schedules on half the fleet.
-  const schedules: ServiceSchedule[] = [];
-  for (let i = 0; i < size; i += 2) {
-    const d = devices[i];
+  // MyGeotab reminder rules (MaintenanceSchedule) — group-scoped like the real thing.
+  const mtype = (id: string, name: string, labels: string[]) => ({ id, name, source: "Scheduled", customSource: "Scheduled", sourceType: "Scheduled", createdBy: { id: "u-2" }, labels, activeFrom: iso(daysAgo(400)), activeTo: "9999-12-31T23:59:59.999Z", version: "1" });
+  const geotabSchedules: GeotabMaintenanceSchedule[] = [
+    { id: "ms-oil", name: "Oil & filter change", active: true, source: "manual", groups: [{ id: "GroupCompanyId" }], labels: ["Oil Change"], kilometers: 12070, months: null, days: null, eventDate: null, eventType: { id: "et-1" }, maintenanceType: mtype("mt-oil", "Oil & filter change", ["Oil Change"]) },
+    { id: "ms-dot", name: "DOT annual inspection", active: true, source: "manual", groups: [{ id: "GroupCompanyId" }], labels: ["Inspection"], kilometers: null, months: 12, days: null, eventDate: null, eventType: { id: "et-2" }, maintenanceType: mtype("mt-dot", "DOT annual inspection", ["Inspection"]) },
+    { id: "ms-hyd", name: "Hydraulic system service", active: true, source: "manual", groups: [{ id: "g-site-0" }, { id: "g-site-2" }], labels: [], kilometers: 8047, months: 6, days: null, eventDate: null, eventType: { id: "et-3" }, maintenanceType: mtype("mt-hyd", "Hydraulic system service", []) },
+    { id: "ms-insight", name: "Oil Life Remaining", active: true, source: "Data Insight", groups: [{ id: "GroupCompanyId" }], labels: ["geotab:oil-change"], kilometers: null, months: null, days: null, eventDate: null, eventType: "EventTypeOilChangeId", maintenanceType: { ...mtype("mt-insight", "Oil Life Remaining", []), sourceType: "DataInsight" } },
+  ];
+
+  // Completed Maintenance Center orders + jobs = "last done" per vehicle for those rules.
+  const geotabWorkOrders: GeotabMaintenanceWorkOrder[] = [];
+  const geotabJobs: GeotabMaintenanceJob[] = [];
+  let ref = 100;
+  const addGeotab = (deviceIdx: number, scheduleId: string | null, daysBack: number, statusCode: number, notes: string, extra: Partial<GeotabMaintenanceWorkOrder> = {}) => {
+    const d = devices[deviceIdx % size];
     const snap = snapshots.get(d.id)!;
-    const sinceMeters = rand() * 9000 * MILE;
-    schedules.push({
-      id: `s-${i}`,
-      deviceId: d.id,
-      deviceName: d.name!,
-      name: i % 4 === 0 ? "Oil & filter change" : i % 4 === 2 ? "DOT annual inspection" : "Hydraulic system service",
-      category: i % 4 === 2 ? "inspection" : "preventive",
-      intervalMeters: i % 4 === 2 ? null : 7500 * MILE,
-      intervalEngineSeconds: i % 4 === 0 ? 250 * 3600 : null,
-      intervalDays: i % 4 === 2 ? 365 : 180,
-      lastDoneAt: iso(daysAgo(Math.floor(rand() * 400))),
-      lastDoneMeters: Math.round(snap.odometerMeters! - sinceMeters),
-      lastDoneEngineSeconds: i % 4 === 0 ? snap.engineSeconds! - Math.floor(rand() * 300) * 3600 : null,
-      notes: "",
-      createdAt: iso(daysAgo(300)),
-      updatedAt: iso(daysAgo(300)),
+    ref += 1;
+    const id = `gwo-${ref}`;
+    const when = daysAgo(daysBack);
+    const odo = Math.max(0, snap.odometerMeters! - daysBack * 55 * MILE);
+    geotabWorkOrders.push({
+      id,
+      reference: String(ref).padStart(6, "0"),
+      device: { id: d.id, name: d.name, groups: d.groups },
+      dateTime: iso(when),
+      updatedDate: iso(when),
+      statusCode,
+      priorityCode: 100,
+      notes,
+      odometerReading: Math.round(odo),
+      engineHoursReading: "00:00:00",
+      engineHoursReadingInHours: Math.round((snap.engineSeconds! - daysBack * 6 * 3600) / 3600),
+      completedDateTime: statusCode === 5 ? iso(new Date(when.getTime() + 3600000)) : null,
+      costCurrency: "Usd",
+      totalCost: 0,
+      laborCost: 0,
+      partsCost: 0,
+      openedByUser: { id: "u-2", name: "sarah.k@demo" },
+      version: "1",
+      ...extra,
     });
+    if (scheduleId) {
+      const sch = geotabSchedules.find((x) => x.id === scheduleId)!;
+      geotabJobs.push({ id: `job-${ref}`, workOrder: { id }, schedule: { id: scheduleId }, device: { id: d.id }, maintenanceType: sch.maintenanceType, statusCode, severityCode: 100, triggeredDate: iso(when), odometerReading: Math.round(odo), engineHoursReading: "00:00:00" });
+    }
+    return id;
+  };
+  for (let i = 0; i < size; i += 2) {
+    const back = Math.floor(rand() * 400);
+    addGeotab(i, "ms-oil", back, 5, "Oil & filter change\n\nRoutine service.");
+    if (i % 4 === 0) addGeotab(i, "ms-dot", 40 + Math.floor(rand() * 500), 5, "DOT annual inspection");
   }
+  // Two orders created in Maintenance Center that the add-in has never seen (adoptable), one of them open.
+  addGeotab(3, "ms-oil", 2, 1, "Oil & filter change\n\nDue per reminder.", { assignedTo: { id: "u-1", name: "mike.r@demo" }, laborCost: 95, partsCost: 60 });
+  addGeotab(9, null, 1, 1, "Replace wiper blades", { assignedTo: { id: "u-3", name: "dwayne.p@demo" } });
 
   // A handful of work orders in various states.
   const titles = ["Brake chamber leak — LR", "Coolant leak at EGR cooler", "Replace hydraulic hose, packer", "Oil & filter change", "Check engine light — aftertreatment", "Mirror glass replacement", "Tire rotation + alignment"];
@@ -184,8 +222,17 @@ export function makeDemoFleet(size = 36, seed = 7, now = new Date()): DemoFleet 
           : { status: "none", claimNumber: "", submittedAt: null, resolvedAt: null, amountClaimed: null, amountRecovered: null, notes: "" },
       },
       activity: [{ at: iso(created), by: "sarah.k@demo", text: "Created" }],
+      geotab: null,
     });
   }
+  // Link every other add-in order to a Maintenance Center header (the merged list reads status from it).
+  workOrders.forEach((w, i) => {
+    if (i % 2) return;
+    const code = w.status === "completed" ? 5 : 1;
+    const id = addGeotab((i * 3) % size, w.source.type === "schedule" ? "ms-oil" : null, 2 + i * 4, code, `${w.title}\n\n${w.description}`, { assignedTo: w.assigneeId ? { id: w.assigneeId, name: w.assigneeName } : null });
+    const g = geotabWorkOrders.find((x) => x.id === id)!;
+    w.geotab = { id, reference: g.reference!, statusCode: code, jobId: null };
+  });
 
   // Open DVIR defects and active faults to convert.
   const dvir: DvirDefectItem[] = [];
@@ -206,7 +253,7 @@ export function makeDemoFleet(size = 36, seed = 7, now = new Date()): DemoFleet 
       remarks: remark,
       isSafeToOperate: i % 3 !== 0,
       repairStatus: "NotRepaired",
-      openWorkOrderNumber: null,
+      openWorkOrderKey: null,
     });
   }
   const faults: FaultItem[] = [];
@@ -230,9 +277,9 @@ export function makeDemoFleet(size = 36, seed = 7, now = new Date()): DemoFleet 
       description: name,
       recommendation: lamp === "Red stop" ? "Stop vehicle safely, service immediately." : "Service at next opportunity.",
       lamps: lamp ? [lamp] : [],
-      openWorkOrderNumber: null,
+      openWorkOrderKey: null,
     });
   }
 
-  return { groups, devices, users, snapshots, store: { workOrders, coverages, schedules }, dvir, faults };
+  return { groups, devices, users, snapshots, store: { workOrders, coverages, schedules: [] }, dvir, faults, geotabSchedules, geotabWorkOrders, geotabJobs };
 }

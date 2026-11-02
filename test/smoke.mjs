@@ -55,6 +55,10 @@ const fixture = {
   defectGroups: [...new Set(fleet.dvir.map((d) => d.defectName))].map((n) => ({ id: `defgrp-${n}`, name: n })),
   faults: fleet.faults.map((f) => ({ id: f.faultId, dateTime: f.dateTime, device: { id: f.deviceId }, diagnostic: { id: f.diagnosticId }, faultState: "Active", count: f.count, amberWarningLamp: f.lamps.includes("Amber"), redStopLamp: f.lamps.includes("Red stop") })),
   diagnostics: Object.fromEntries(fleet.faults.map((f) => [f.diagnosticId, { id: f.diagnosticId, name: f.name, code: f.code }])),
+  // Maintenance Center (undocumented types), as MyGeotab returns them.
+  schedules: fleet.geotabSchedules,
+  geotabOrders: fleet.geotabWorkOrders,
+  geotabJobs: fleet.geotabJobs,
 };
 
 const types = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".woff2": "font/woff2", ".woff": "font/woff", ".otf": "font/otf", ".map": "application/json" };
@@ -80,10 +84,13 @@ page.on("console", (msg) => {
 
 await page.addInitScript((fx) => {
   const store = [...fx.addInData];
+  const mc = { orders: [...fx.geotabOrders], jobs: [...fx.geotabJobs] };
   let seq = 1000;
+  let ref = 500;
   const calls = [];
   window.__calls = calls;
   window.__store = store;
+  window.__mc = mc;
   function answer(method, params) {
     calls.push([method, params?.typeName ?? method]);
     if (method === "Get") {
@@ -96,9 +103,28 @@ await page.addInitScript((fx) => {
           return fx.users;
         case "AddInData":
           return store.filter((r) => r.addInId === params.search?.addInId);
+        case "MaintenanceSchedule":
+          return fx.schedules;
+        case "MaintenanceWorkOrder":
+          return params.search?.id ? mc.orders.filter((o) => o.id === params.search.id) : mc.orders;
+        case "MaintenanceWorkOrderJob":
+          return mc.jobs;
         case "StatusData": {
           const id = params.search?.deviceSearch?.id;
           const diag = params.search?.diagnosticSearch?.id;
+          if (!id) {
+            // Fleet-wide window: every vehicle's latest reading (the demo stamps them "now").
+            const from = new Date(params.search.fromDate).getTime();
+            const to = new Date(params.search.toDate).getTime();
+            const out = [];
+            for (const [did, s] of Object.entries(fx.snapshots)) {
+              const v = diag === "DiagnosticOdometerAdjustmentId" ? s.odometerMeters : s.engineSeconds;
+              const at = diag === "DiagnosticOdometerAdjustmentId" ? s.odometerAt : s.engineAt;
+              const t = new Date(at).getTime();
+              if (v != null && t >= from && t <= to) out.push({ device: { id: did }, diagnostic: { id: diag }, dateTime: at, data: v });
+            }
+            return out;
+          }
           const s = fx.snapshots[id];
           if (!s) return [];
           if (diag === "DiagnosticOdometerAdjustmentId") return s.odometerMeters == null ? [] : [{ device: { id }, diagnostic: { id: diag }, dateTime: s.odometerAt, data: s.odometerMeters }];
@@ -112,6 +138,29 @@ await page.addInitScript((fx) => {
           return fx.diagnostics[params.search?.id] ? [fx.diagnostics[params.search.id]] : [];
       }
       return [];
+    }
+    if (params?.typeName === "MaintenanceWorkOrder") {
+      const e = params.entity;
+      if (method === "Add") {
+        if (new Date(e.dateTime).getTime() > Date.now()) throw new Error("WorkOrder.DateTime cannot be in the future");
+        const id = `gwo-new-${seq++}`;
+        ref += 1;
+        const { workJobs, jobCount, ...header } = e;
+        mc.orders.push({ ...header, id, reference: String(ref).padStart(6, "0"), updatedDate: new Date().toISOString(), openedByUser: { id: "u-x", name: "tech@demo" } });
+        for (const j of workJobs ?? []) mc.jobs.push({ ...j, id: `job-new-${seq++}`, workOrder: { id } });
+        return id;
+      }
+      if (method === "Set") {
+        const i = mc.orders.findIndex((o) => o.id === e.id);
+        if (i < 0) throw new Error("Set: unknown MaintenanceWorkOrder " + e.id);
+        mc.orders[i] = { ...mc.orders[i], ...e, updatedDate: new Date().toISOString() };
+        return null;
+      }
+      if (method === "Remove") {
+        const i = mc.orders.findIndex((o) => o.id === e.id);
+        if (i >= 0) mc.orders.splice(i, 1);
+        return null;
+      }
     }
     if (method === "Add") {
       const id = `new-${seq++}`;
@@ -195,6 +244,7 @@ await page.waitForSelector("text=Create work order", { timeout: 20000 });
 const dvirRows = await page.locator(".mwo-table tbody tr").count();
 step(`DVIR queue shows ${dvirRows} open defects`);
 const before = await page.evaluate(() => window.__store.length);
+const mcBefore = await page.evaluate(() => window.__mc.orders.length);
 await page.locator("button:has-text('Create work order')").first().click();
 await page.waitForSelector(".mwo-panel", { timeout: 5000 });
 const draftText = await page.locator(".mwo-panel").innerText();
@@ -209,8 +259,32 @@ else step("new work order written to AddInData (mock)");
 const saved = await page.evaluate(() => window.__store[window.__store.length - 1]);
 if (saved.details?.kind !== "wo" || saved.details?.data?.source?.type !== "dvir") fail("saved record is not a dvir-sourced work order envelope");
 if (!Array.isArray(saved.groups) || !saved.groups.length) fail("saved record has no groups");
+const mcAfter = await page.evaluate(() => window.__mc.orders.length);
+if (mcAfter !== mcBefore + 1) fail(`expected one MaintenanceWorkOrder Add (orders ${mcBefore} → ${mcAfter})`);
+else step("new work order also written to MyGeotab Maintenance Center (mock)");
+const gwo = await page.evaluate(() => window.__mc.orders[window.__mc.orders.length - 1]);
+if (!saved.details.data.geotab || saved.details.data.geotab.id !== gwo.id) fail("AddInData record is not linked to the Geotab order id");
+if (gwo.statusCode !== 1 || !/Source: DVIR/.test(gwo.notes ?? "")) fail(`Geotab header wrong: status ${gwo.statusCode}, notes ${JSON.stringify(gwo.notes)}`);
+else step(`Geotab order #${gwo.reference} has statusCode 1 and the DVIR source in notes`);
+// Vehicles with coverage get the warranty block in the Geotab notes.
+// A DVIR row on a vehicle that has warranty coverage → the Geotab notes carry the warranty block.
+const coveredIds = await page.evaluate(() => window.__store.filter((r) => r.details?.kind === "coverage").map((r) => r.details.data.deviceId));
+const coveredName = fixture.devices.find((d) => coveredIds.includes(d.id) && fleet.dvir.some((x) => x.deviceId === d.id))?.name;
+if (!coveredName) fail("demo has no DVIR defect on a vehicle with coverage");
+else {
+  const row = page.locator(".mwo-table tbody tr", { hasText: coveredName }).first();
+  await row.locator("button:has-text('Create work order')").click();
+  await page.waitForSelector(".mwo-panel", { timeout: 5000 });
+  const preview = await page.locator(".mwo-note-preview").innerText().catch(() => "");
+  if (!/Warranty: /.test(preview)) fail(`editor shows no warranty-note preview for ${coveredName}: ${preview}`);
+  await page.locator("button:has-text('Create work order')").last().click();
+  await page.waitForSelector(".mwo-panel", { state: "detached", timeout: 10000 });
+  const g2 = await page.evaluate(() => window.__mc.orders[window.__mc.orders.length - 1]);
+  if (!/\n——\n[\s\S]*Warranty: .*Covered until /.test(g2.notes ?? "")) fail(`Geotab notes missing the warranty block: ${JSON.stringify(g2.notes)}`);
+  else step(`warranty block written to Geotab notes for ${coveredName}: ${(g2.notes.match(/Warranty: [^\n]*/) ?? [""])[0].slice(0, 90)}…`);
+}
 const bannerText = await page.locator(".mwo-banners").innerText().catch(() => "");
-if (!/Saved WO-/.test(bannerText)) fail(`expected save confirmation, saw: ${bannerText}`);
+if (!/Saved #\d+/.test(bannerText)) fail(`expected save confirmation with the Geotab reference, saw: ${bannerText}`);
 
 // The DVIR row should now link to the new order instead of offering to create one.
 const linkCount = await page.locator(".mwo-table tbody tr button.mwo-link").count();
@@ -231,10 +305,33 @@ await page.locator("button:has-text('Start work')").click();
 await page.locator("button:has-text('Complete')").first().click();
 await page.locator("button:has-text('Save changes')").click();
 await page.waitForSelector(".mwo-panel", { state: "detached", timeout: 10000 });
-const completed = await page.evaluate(() => window.__store.find((r) => r.details?.data?.source?.type === "dvir" && r.details?.data?.status === "completed"));
+const completed = await page.evaluate((gid) => window.__store.find((r) => r.details?.data?.geotab?.id === gid), gwo.id);
 if (!completed) fail("completed order not written back with status completed");
 else if (completed.details.data.odometerAtClose == null) fail("odometer at close not captured on completion");
 else step("order completed with odometer-at-close captured");
+const gDone = await page.evaluate((id) => window.__mc.orders.find((o) => o.id === id), completed?.details?.data?.geotab?.id ?? "");
+if (!gDone || gDone.statusCode !== 5 || !gDone.completedDateTime) fail(`Geotab order not set to completed: ${JSON.stringify(gDone && { statusCode: gDone.statusCode, completedDateTime: gDone.completedDateTime })}`);
+else step("Geotab order Set to statusCode 5 with completedDateTime");
+
+// A Geotab-only order (created in Maintenance Center) is listed and can be adopted by saving it.
+await page.getByRole("tab", { name: /Work orders/ }).click();
+await page.waitForSelector(".mwo-table .mwo-row", { timeout: 5000 });
+await page.locator("button:has-text('All')").click();
+const adopt = page.locator(".mwo-table .mwo-row", { hasText: "Replace wiper blades" });
+if ((await adopt.count()) === 0) fail("Geotab-only order 'Replace wiper blades' not listed");
+else {
+  await adopt.first().click();
+  await page.waitForSelector(".mwo-panel", { timeout: 5000 });
+  const txt = await page.locator(".mwo-panel").innerText();
+  if (!/MyGeotab #\d+/.test(txt)) fail("adopted order editor does not show its Geotab reference");
+  const sb = await page.evaluate(() => window.__store.length);
+  await page.locator("button:has-text('+ Part')").click();
+  await page.locator("button:has-text('Save changes')").click();
+  await page.waitForSelector(".mwo-panel", { state: "detached", timeout: 10000 });
+  const sa = await page.evaluate(() => window.__store.length);
+  if (sa !== sb + 1) fail("adopting a Geotab-only order did not create its AddInData record");
+  else step("Geotab-only order adopted: AddInData extras record created and linked");
+}
 
 // Warranty tab → add coverage for a vehicle without one.
 await page.getByRole("tab", { name: /^Warranty/ }).click();
@@ -260,12 +357,33 @@ const storeAfter = await page.evaluate(() => window.__store.length);
 if (storeAfter !== storeBefore + 1) fail("coverage was not added to AddInData");
 else step("warranty coverage added");
 
-// Service schedules tab renders the due evaluation.
-await page.getByRole("tab", { name: /Service schedules/ }).click();
-await page.waitForSelector("text=Service schedules", { timeout: 5000 });
-const schedRows = await page.locator(".mwo-table tbody tr").count();
-if (schedRows < 1) fail("no schedules rendered");
-else step(`service schedules tab lists ${schedRows} schedules`);
+// Reminders tab: MyGeotab rules, expand one, create a work order from a due vehicle (→ Add with a job).
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.getByRole("tab", { name: /^Reminders/ }).click();
+await page.waitForSelector("h3:has-text('Reminders')", { timeout: 5000 });
+const ruleCount = await page.locator(".mwo-rule").count();
+if (ruleCount !== 3) fail(`expected 3 user reminder rules (Data Insight filtered out), got ${ruleCount}`);
+else step("reminders tab lists the 3 MyGeotab rules (insight rule filtered out)");
+await page.locator("button:has-text('Overdue')").first().click();
+await page.locator(".mwo-rule-head").first().click();
+await page.waitForSelector(".mwo-rule .mwo-table tbody tr", { timeout: 5000 });
+const overdueRows = await page.locator(".mwo-rule .mwo-table tbody tr").count();
+if (overdueRows < 1) fail("no overdue vehicles under the first rule");
+else step(`${overdueRows} overdue vehicles under the first rule`);
+const jobsBefore = await page.evaluate(() => window.__mc.jobs.length);
+await page.locator(".mwo-rule .mwo-table button:has-text('Create work order')").first().click();
+await page.waitForSelector(".mwo-panel", { timeout: 5000 });
+const remDraft = await page.locator(".mwo-panel").innerText();
+if (!/Reminder — /.test(remDraft)) fail("reminder draft missing its source");
+await page.locator("button:has-text('Create work order')").last().click();
+await page.waitForSelector(".mwo-panel", { state: "detached", timeout: 10000 });
+const jobsAfter = await page.evaluate(() => window.__mc.jobs.length);
+const lastJob = await page.evaluate(() => window.__mc.jobs[window.__mc.jobs.length - 1]);
+if (jobsAfter !== jobsBefore + 1 || !lastJob?.schedule?.id || !lastJob?.maintenanceType?.id) fail(`expected a MaintenanceWorkOrderJob linked to the rule, got ${JSON.stringify(lastJob)}`);
+else step(`reminder order created with a job on schedule ${lastJob.schedule.id}`);
+const linkedRow = await page.locator(".mwo-rule .mwo-table tbody tr button.mwo-link").count();
+if (linkedRow < 1) fail("reminder row did not switch to the open-order link");
+else step("reminder row now links to the open order");
 
 await page.screenshot({ path: resolve(here, ".build/smoke.png"), fullPage: true });
 const apiCalls = await page.evaluate(() => window.__calls.length);

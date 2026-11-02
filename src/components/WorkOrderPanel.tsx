@@ -25,7 +25,7 @@ import type {
 } from "../types";
 import { userLabel } from "../api/geotab";
 import { formatDateTime, formatDistance, formatHours, formatMoney, toDateInputValue } from "../utils/format";
-import { activeCoverages, coverageLabel } from "../utils/warranty";
+import { activeCoverages, coverageLabel, warrantyNoteFor } from "../utils/warranty";
 import {
   CATEGORY_LABEL,
   CLAIM_ORDER,
@@ -55,6 +55,8 @@ interface Props {
   settings: Settings;
   currentUser: string;
   session: GeotabSession | null;
+  /** Maintenance Center sync is on and the database answered its calls. */
+  geotabSync: boolean;
   onChange: (next: WorkOrder) => void;
   onChangeVehicle: (deviceId: string) => void;
   onSave: () => void;
@@ -68,7 +70,7 @@ const LINE_OPTIONS = (Object.keys(LINE_TYPE_LABEL) as LineType[]).map((id) => ({
 const CLAIM_OPTIONS = CLAIM_ORDER.map((id) => ({ id, name: CLAIM_STATUS_LABEL[id] }));
 
 export function WorkOrderPanel(props: Props) {
-  const { draft, isNew, saving, devices, users, coverages, snapshots, settings, currentUser, session, onChange, onChangeVehicle, onSave, onDelete, onClose } = props;
+  const { draft, isNew, saving, devices, users, coverages, snapshots, settings, currentUser, session, geotabSync, onChange, onChangeVehicle, onSave, onDelete, onClose } = props;
   const vp = useViewport();
   const [note, setNote] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -78,6 +80,8 @@ export function WorkOrderPanel(props: Props) {
     if (!draft) return [];
     return activeCoverages(draft.deviceId, coverages, snap, settings).map((x) => ({ id: x.coverage.id ?? "", name: coverageLabel(x.coverage) }));
   }, [draft, coverages, snap, settings]);
+
+  const warrantyNote = useMemo(() => (draft ? warrantyNoteFor(draft, coverages, snap, settings) : ""), [draft, coverages, snap, settings]);
 
   const assigneeOptions = useMemo(() => [{ id: "__none", name: "Unassigned" }, ...users.map((u) => ({ id: u.id, name: userLabel(u) }))], [users]);
 
@@ -109,13 +113,13 @@ export function WorkOrderPanel(props: Props) {
     <SidePanel
       className="mwo-side-panel"
       isOpen
-      label={isNew ? "New work order" : `${formatNumber(wo.number)} — ${wo.title || "Work order"}`}
+      label={isNew ? "New work order" : `${formatNumber(wo)} — ${wo.title || "Work order"}`}
       width={panelWidth(vp, 840)}
       onHidePanel={(reason) => {
         if (reason === SidePanelCloseReason.Escape) onClose();
       }}
     >
-      <SidePanel.Cell title={isNew ? "New work order" : `${formatNumber(wo.number)} · ${STATUS_LABEL[wo.status]}`}>
+      <SidePanel.Cell title={isNew ? "New work order" : `${formatNumber(wo)} · ${STATUS_LABEL[wo.status]}`}>
         <div className="mwo-panel">
           {/* ---- Status workflow ---- */}
           {!isNew ? (
@@ -130,6 +134,25 @@ export function WorkOrderPanel(props: Props) {
               {done ? statusButton("open", "Reopen") : null}
             </div>
           ) : null}
+
+          {/* ---- MyGeotab link ---- */}
+          <div className="mwo-muted mwo-small mwo-sync-line">
+            {wo.geotab ? (
+              <>
+                <span className="mwo-pill mwo-pill-ok">MyGeotab {wo.geotab.reference ? `#${wo.geotab.reference}` : "linked"}</span>
+                {" "}Maintenance Center order{Object.values(settings.statusCodeMap).includes(wo.geotab.statusCode) ? "" : ` · Geotab status code ${wo.geotab.statusCode} (not mapped in Settings)`}
+                {wo.id ? "" : " · add-in details (lines, warranty, activity) are saved on first save"}
+              </>
+            ) : geotabSync ? (
+              <>
+                <span className="mwo-pill mwo-pill-info">Not synced</span> Saving writes this order to MyGeotab's Maintenance Center.
+              </>
+            ) : (
+              <>
+                <span className="mwo-pill mwo-pill-muted">Add-in only</span> MyGeotab sync is off in Settings.
+              </>
+            )}
+          </div>
 
           {/* ---- Vehicle + job ---- */}
           <div className="mwo-form-grid">
@@ -310,6 +333,13 @@ export function WorkOrderPanel(props: Props) {
             ) : null}
           </div>
 
+          {warrantyNote && geotabSync ? (
+            <div className="mwo-note-preview">
+              <span className="mwo-field-label">Goes into the MyGeotab work order notes</span>
+              <pre>{warrantyNote}</pre>
+            </div>
+          ) : null}
+
           {/* ---- Activity ---- */}
           <div className="mwo-panel-section">
             <h4>Activity</h4>
@@ -340,7 +370,7 @@ export function WorkOrderPanel(props: Props) {
               {!isNew ? (
                 confirmDelete ? (
                   <span className="mwo-actions">
-                    <span className="mwo-muted mwo-small">Delete {formatNumber(wo.number)}?</span>
+                    <span className="mwo-muted mwo-small">Delete {formatNumber(wo)}{wo.geotab ? " here and in MyGeotab" : ""}?</span>
                     <Button type="destructive" onClick={onDelete} disabled={saving}>
                       Yes, delete
                     </Button>

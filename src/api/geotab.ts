@@ -347,7 +347,7 @@ export async function fetchOpenDvirDefects(
         remarks: remarks || log.driverRemark?.trim() || "",
         isSafeToOperate: typeof log.isSafeToOperate === "boolean" ? log.isSafeToOperate : null,
         repairStatus: d.repairStatus ?? "",
-        openWorkOrderNumber: null,
+        openWorkOrderKey: null,
       });
     }
   }
@@ -496,7 +496,7 @@ export async function fetchActiveFaults(
       description: f.faultDescription ?? "",
       recommendation: f.recommendation ?? "",
       lamps,
-      openWorkOrderNumber: null,
+      openWorkOrderKey: null,
     });
   });
   items.sort((a, b) => b.dateTime.localeCompare(a.dateTime));

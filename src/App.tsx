@@ -1,11 +1,17 @@
 /**
  * Maintenance Work Orders — top-level state and orchestration.
  *
- * Load: session → groups + devices + users → AddInData (work orders,
- * coverages, schedules) → odometer / engine-hours snapshot for every vehicle
- * those records reference. Intake queues (DVIR defects, faults) load on
- * demand. Editors are Zenith side panels whose drafts live here so a vehicle
- * change can fetch that vehicle's readings and re-run warranty eligibility.
+ * System of record for work-order headers and reminders is Geotab's own
+ * Maintenance Center (MaintenanceWorkOrder / MaintenanceWorkOrderJob /
+ * MaintenanceSchedule — undocumented API, see api/maintenanceCenter.ts).
+ * AddInData keeps what Geotab has no field for: parts & labor lines,
+ * warranty eligibility + claim, category, due date, activity. The two are
+ * merged per order on Geotab's id (utils/geotabMerge.ts).
+ *
+ * Load: session → groups + devices + users → Maintenance Center (rules,
+ * orders, jobs) + AddInData (extras, coverages) → fleet-wide odometer /
+ * engine-hours sweep for every vehicle a reminder, coverage or open order
+ * references. Intake queues (DVIR defects, faults) load on demand.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,28 +22,36 @@ import type {
   GeotabApi,
   GeotabDevice,
   GeotabGroup,
+  GeotabMaintenanceWorkOrder,
   GeotabPageState,
   GeotabSession,
   GeotabUser,
   Progress,
-  ServiceSchedule,
+  ReminderJob,
+  ReminderRule,
+  ReminderVehicleRow,
   Settings,
   StoreData,
   VehicleSnapshot,
   WarrantyCoverage,
   WorkOrder,
+  WorkOrderPriority,
+  WorkOrderStatus,
 } from "./types";
 import { Pacer, fetchActiveDevices, fetchActiveFaults, fetchGroups, fetchOpenDvirDefects, fetchSession, fetchSnapshots, fetchUsers, friendlyError } from "./api/geotab";
 import { AddInDataStore, MemoryStore, type Store } from "./api/store";
+import { DemoMaintenanceClient, LiveMaintenanceClient, isUserReminder, sweepSnapshots, type MaintenanceClient } from "./api/maintenanceCenter";
 import { makeDemoFleet } from "./utils/demo";
 import { expandGroups } from "./utils/groups";
+import { buildReminderRows, mergeWorkOrders, vehiclesInAnyRule } from "./utils/geotabMerge";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./utils/storage";
-import { applyWarrantyEligibility, createWorkOrder, downloadText, fromDvirDefect, fromFault, fromSchedule, matchesSearch, matchesView, rollSchedule, VIEW_LABEL, workOrdersCsv, type ViewFilter } from "./utils/workorders";
+import { applyWarrantyEligibility, createWorkOrder, downloadText, formatNumber, fromDvirDefect, fromFault, fromReminder, matchesSearch, matchesView, PRIORITY_LABEL, STATUS_LABEL, VIEW_LABEL, woKey, workOrdersCsv, type ViewFilter } from "./utils/workorders";
 import { todayIso } from "./utils/format";
+import { warrantyNoteFor } from "./utils/warranty";
 import { AttentionTab, type AttentionView } from "./components/AttentionTab";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GroupFilterPicker } from "./components/GroupFilterPicker";
-import { SchedulePanel, SchedulesTab, evaluateAll } from "./components/SchedulesTab";
+import { RemindersTab } from "./components/RemindersTab";
 import { Summary } from "./components/Summary";
 import { CoveragePanel, WarrantyTab } from "./components/WarrantyTab";
 import { WorkOrderPanel } from "./components/WorkOrderPanel";
@@ -50,17 +64,23 @@ interface AppProps {
   focusNonce: number;
 }
 
-type MainTab = "orders" | "attention" | "warranty" | "schedules";
+type MainTab = "orders" | "attention" | "warranty" | "reminders";
 
-type Editor =
-  | { kind: "wo"; draft: WorkOrder; isNew: boolean }
-  | { kind: "coverage"; draft: WarrantyCoverage; isNew: boolean }
-  | { kind: "schedule"; draft: ServiceSchedule; isNew: boolean }
-  | null;
+type Editor = { kind: "wo"; draft: WorkOrder; isNew: boolean } | { kind: "coverage"; draft: WarrantyCoverage; isNew: boolean } | null;
 
-/** Auto-read readings for at most this many vehicles on load (2 calls each). */
-const AUTO_SNAPSHOT_MAX = 300;
+interface GeotabState {
+  rules: ReminderRule[];
+  orders: GeotabMaintenanceWorkOrder[];
+  jobs: ReminderJob[];
+  /** The database answered the Maintenance Center calls. */
+  available: boolean;
+  error: string | null;
+}
+
 const EMPTY: StoreData = { workOrders: [], coverages: [], schedules: [] };
+const EMPTY_GEOTAB: GeotabState = { rules: [], orders: [], jobs: [], available: false, error: null };
+/** Per-device fallback cap inside the fleet-wide sweep. */
+const DEEP_LOOKUP_MAX = 300;
 
 export default function App({ api, pageState: _pageState, focusNonce }: AppProps) {
   const insideMyGeotab = api != null;
@@ -73,6 +93,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   const [users, setUsers] = useState<GeotabUser[]>([]);
   const [groupIds, setGroupIds] = useState<string[]>(["GroupCompanyId"]);
   const [data, setData] = useState<StoreData>(EMPTY);
+  const [geotab, setGeotab] = useState<GeotabState>(EMPTY_GEOTAB);
   const [snapshots, setSnapshots] = useState<Map<string, VehicleSnapshot>>(new Map());
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -88,10 +109,11 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   const [faults, setFaults] = useState<FaultItem[] | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
   const [intakeError, setIntakeError] = useState<string | null>(null);
-  const [pendingSnapshots, setPendingSnapshots] = useState<string[]>([]);
+  const [readingsDone, setReadingsDone] = useState(false);
 
   const pacerRef = useRef(new Pacer(settings.callsPerMinute));
   const storeRef = useRef<Store | null>(null);
+  const mcRef = useRef<MaintenanceClient | null>(null);
   const demoRef = useRef<ReturnType<typeof makeDemoFleet> | null>(null);
   const devicesRef = useRef<Map<string, GeotabDevice>>(new Map());
   const loadSeq = useRef(0);
@@ -108,14 +130,16 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   }, [devices]);
   const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const currentUser = session?.userName ?? (insideMyGeotab ? "me" : "demo.user");
+  const syncOn = settings.syncToGeotab && geotab.available;
 
   // -------------------------------------------------------------------------
-  // Loading
+  // Readings
   // -------------------------------------------------------------------------
 
-  const readSnapshots = useCallback(
-    async (ids: string[], label = "Reading vehicle odometer & engine hours") => {
-      const todo = Array.from(new Set(ids)).filter(Boolean);
+  /** Fleet-wide sweep (few calls) for many vehicles; per-device for one or two. */
+  const readReadings = useCallback(
+    async (ids: string[], label = "Reading odometer & engine hours") => {
+      const todo = Array.from(new Set(ids)).filter((id) => devicesRef.current.has(id));
       if (!todo.length) return new Map<string, VehicleSnapshot>();
       if (!insideMyGeotab) {
         const m = new Map<string, VehicleSnapshot>();
@@ -126,12 +150,17 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         setSnapshots((prev) => new Map([...prev, ...m]));
         return m;
       }
-      const got = await fetchSnapshots(api!, todo, pacerRef.current, (text, pct) => setProgress({ text: `${label}: ${text}`, pct }));
+      const onProgress = (text: string, pct: number | null) => setProgress({ text: `${label}: ${text}`, pct });
+      const got = todo.length <= 10 ? await fetchSnapshots(api!, todo, pacerRef.current, onProgress) : await sweepSnapshots(api!, todo, pacerRef.current, onProgress, DEEP_LOOKUP_MAX);
       setSnapshots((prev) => new Map([...prev, ...got]));
       return got;
     },
     [api, insideMyGeotab]
   );
+
+  // -------------------------------------------------------------------------
+  // Loading
+  // -------------------------------------------------------------------------
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -140,6 +169,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
     setProgress({ text: "Loading…", pct: null });
     try {
       let store: Store;
+      let mc: MaintenanceClient;
       let groups: Map<string, GeotabGroup>;
       let devs: GeotabDevice[];
       let usrs: GeotabUser[];
@@ -150,6 +180,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         setProgress({ text: "Loading groups, vehicles and users…", pct: null });
         [groups, devs, usrs] = await Promise.all([fetchGroups(api!, pacer), fetchActiveDevices(api!, pacer), fetchUsers(api!, pacer)]);
         store = new AddInDataStore(api!, pacer, () => devicesRef.current);
+        mc = new LiveMaintenanceClient(api!, pacer);
       } else {
         const demo = demoRef.current ?? makeDemoFleet(36, 7, new Date());
         demoRef.current = demo;
@@ -157,34 +188,41 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         devs = demo.devices;
         usrs = demo.users;
         store = storeRef.current ?? new MemoryStore(demo.store);
+        mc = mcRef.current ?? new DemoMaintenanceClient(demo.geotabSchedules, demo.geotabWorkOrders, demo.geotabJobs);
         setSession(null);
       }
       if (seq !== loadSeq.current) return;
       storeRef.current = store;
+      mcRef.current = mc;
       devicesRef.current = new Map(devs.map((d) => [d.id, d]));
       setGroupsById(groups);
       setDevices(devs);
       setUsers(usrs);
-      setProgress({ text: "Loading work orders, warranties and schedules…", pct: null });
-      const loaded = await store.load();
+
+      setProgress({ text: "Loading Maintenance Center (reminders, work orders, jobs) and add-in data…", pct: null });
+      const [loaded, mcResult] = await Promise.all([
+        store.load(),
+        settings.syncToGeotab
+          ? mc.loadAll().then((r) => ({ ...r, available: true, error: null as string | null })).catch((e) => ({ rules: [], orders: [], jobs: [], available: false, error: friendlyError(e) }))
+          : Promise.resolve({ rules: [], orders: [], jobs: [], available: false, error: null as string | null }),
+      ]);
       if (seq !== loadSeq.current) return;
       setData(loaded);
-      // Readings for every vehicle the records reference (bounded).
-      const refs = new Set<string>();
-      for (const c of loaded.coverages) refs.add(c.deviceId);
-      for (const s of loaded.schedules) refs.add(s.deviceId);
-      for (const w of loaded.workOrders) if (w.status !== "completed" && w.status !== "cancelled") refs.add(w.deviceId);
-      const ids = Array.from(refs).filter((id) => devicesRef.current.has(id));
-      if (ids.length <= AUTO_SNAPSHOT_MAX) {
-        await readSnapshots(ids);
-        setPendingSnapshots([]);
-      } else {
-        setPendingSnapshots(ids);
-      }
+      setGeotab({ rules: mcResult.rules.filter(isUserReminder), orders: mcResult.orders, jobs: mcResult.jobs, available: mcResult.available, error: mcResult.error });
       if (!insideMyGeotab) {
         setDvir(demoRef.current!.dvir);
         setFaults(demoRef.current!.faults);
       }
+
+      // Readings for every vehicle a reminder, coverage or active order references.
+      const expand = (ids: string[]) => expandGroups(ids, groups);
+      const refs = new Set<string>(vehiclesInAnyRule(mcResult.rules.filter(isUserReminder), devs, expand));
+      for (const c of loaded.coverages) refs.add(c.deviceId);
+      for (const w of loaded.workOrders) if (w.status !== "completed" && w.status !== "cancelled") refs.add(w.deviceId);
+      for (const o of mcResult.orders) if (o.statusCode !== settings.statusCodeMap.completed && o.device?.id) refs.add(o.device.id);
+      await readReadings(Array.from(refs));
+      if (seq !== loadSeq.current) return;
+      setReadingsDone(true);
     } catch (e) {
       if (seq === loadSeq.current) setError(friendlyError(e));
     } finally {
@@ -193,7 +231,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         setProgress(null);
       }
     }
-  }, [api, insideMyGeotab, readSnapshots]);
+  }, [api, insideMyGeotab, readReadings, settings.syncToGeotab, settings.statusCodeMap.completed]);
 
   useEffect(() => {
     void load();
@@ -203,17 +241,23 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   // Scope (group picker) and derived lists
   // -------------------------------------------------------------------------
 
+  const expand = useCallback((ids: string[]) => expandGroups(ids, groupsById), [groupsById]);
   const scopedDeviceIds = useMemo(() => {
     if (!groupIds.length || groupIds.includes("GroupCompanyId")) return null; // everything
-    const allowed = expandGroups(groupIds, groupsById);
+    const allowed = expand(groupIds);
     return new Set(devices.filter((d) => (d.groups ?? []).some((g) => allowed.has(g.id))).map((d) => d.id));
-  }, [groupIds, groupsById, devices]);
+  }, [groupIds, expand, devices]);
   const inScope = useCallback((deviceId: string) => (scopedDeviceIds ? scopedDeviceIds.has(deviceId) : true), [scopedDeviceIds]);
   const scopedDevices = useMemo(() => devices.filter((d) => inScope(d.id)), [devices, inScope]);
 
-  const workOrders = useMemo(() => data.workOrders.filter((w) => inScope(w.deviceId)), [data.workOrders, inScope]);
+  /** One list: Geotab headers ⨝ add-in extras, plus unsynced local orders. */
+  const merged = useMemo(
+    () => (syncOn ? mergeWorkOrders({ local: data.workOrders, geotab: geotab.orders, jobs: geotab.jobs, rules: geotab.rules, devicesById, usersById, settings }) : { workOrders: data.workOrders, orphaned: [] }),
+    [syncOn, data.workOrders, geotab.orders, geotab.jobs, geotab.rules, devicesById, usersById, settings]
+  );
+  const allOrders = merged.workOrders;
+  const workOrders = useMemo(() => allOrders.filter((w) => inScope(w.deviceId)), [allOrders, inScope]);
   const coverages = useMemo(() => data.coverages.filter((c) => inScope(c.deviceId)), [data.coverages, inScope]);
-  const schedules = useMemo(() => data.schedules.filter((s) => inScope(s.deviceId)), [data.schedules, inScope]);
 
   const visibleOrders = useMemo(() => {
     const now = new Date();
@@ -221,31 +265,32 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   }, [workOrders, view, search]);
 
   const activeByDvir = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const w of data.workOrders) {
+    const m = new Map<string, string>();
+    for (const w of allOrders) {
       if (w.source.type !== "dvir" || w.status === "completed" || w.status === "cancelled") continue;
-      if (w.source.defectId) m.set(`d:${w.source.defectId}`, w.number);
-      if (w.source.refId) m.set(`l:${w.source.refId}`, w.number);
+      if (w.source.defectId) m.set(`d:${w.source.defectId}`, woKey(w));
+      if (w.source.refId) m.set(`l:${w.source.refId}`, woKey(w));
     }
     return m;
-  }, [data.workOrders]);
+  }, [allOrders]);
   const activeByFault = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const w of data.workOrders) {
+    const m = new Map<string, string>();
+    for (const w of allOrders) {
       if (w.source.type !== "fault" || w.status === "completed" || w.status === "cancelled") continue;
-      if (w.source.diagnosticId) m.set(`${w.deviceId}|${w.source.diagnosticId}`, w.number);
+      if (w.source.diagnosticId) m.set(`${w.deviceId}|${w.source.diagnosticId}`, woKey(w));
     }
     return m;
-  }, [data.workOrders]);
-  const dvirRows = useMemo(
-    () => (dvir ? dvir.filter((d) => inScope(d.deviceId)).map((d) => ({ ...d, openWorkOrderNumber: activeByDvir.get(`d:${d.defectId}`) ?? activeByDvir.get(`l:${d.logId}`) ?? null })) : null),
-    [dvir, inScope, activeByDvir]
+  }, [allOrders]);
+  const dvirRows = useMemo(() => (dvir ? dvir.filter((d) => inScope(d.deviceId)).map((d) => ({ ...d, openWorkOrderKey: activeByDvir.get(`d:${d.defectId}`) ?? activeByDvir.get(`l:${d.logId}`) ?? null })) : null), [dvir, inScope, activeByDvir]);
+  const faultRows = useMemo(() => (faults ? faults.filter((f) => inScope(f.deviceId)).map((f) => ({ ...f, openWorkOrderKey: activeByFault.get(`${f.deviceId}|${f.diagnosticId}`) ?? null })) : null), [faults, inScope, activeByFault]);
+
+  const geotabById = useMemo(() => new Map(geotab.orders.map((o) => [o.id, o])), [geotab.orders]);
+  const reminderRows = useMemo<ReminderVehicleRow[]>(
+    () => (syncOn ? buildReminderRows({ rules: geotab.rules, devices: scopedDevices, expand, jobs: geotab.jobs, geotabById, snapshots, settings }) : []),
+    [syncOn, geotab.rules, geotab.jobs, scopedDevices, expand, geotabById, snapshots, settings]
   );
-  const faultRows = useMemo(
-    () => (faults ? faults.filter((f) => inScope(f.deviceId)).map((f) => ({ ...f, openWorkOrderNumber: activeByFault.get(`${f.deviceId}|${f.diagnosticId}`) ?? null })) : null),
-    [faults, inScope, activeByFault]
-  );
-  const dueRows = useMemo(() => evaluateAll(schedules, snapshots, data.workOrders, settings).filter((r) => r.evaluation.state === "overdue" || r.evaluation.state === "due_soon"), [schedules, snapshots, data.workOrders, settings]);
+  const dueRows = useMemo(() => reminderRows.filter((r) => r.evaluation.state === "overdue" || r.evaluation.state === "due_soon"), [reminderRows]);
+  const readingsPending = useMemo(() => (readingsDone ? 0 : new Set(reminderRows.filter((r) => !snapshots.has(r.deviceId)).map((r) => r.deviceId)).size), [reminderRows, snapshots, readingsDone]);
 
   // -------------------------------------------------------------------------
   // Intake refresh
@@ -265,7 +310,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       } else if (attentionView === "faults") {
         setFaults(await fetchActiveFaults(api!, pacerRef.current, groupIds, settings.faultLookbackDays, devicesById));
       } else {
-        await readSnapshots(schedules.map((s) => s.deviceId), "Refreshing readings");
+        await readReadings(reminderRows.map((r) => r.deviceId), "Refreshing readings");
       }
     } catch (e) {
       setIntakeError(friendlyError(e));
@@ -273,7 +318,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       setIntakeLoading(false);
       setProgress(null);
     }
-  }, [insideMyGeotab, api, attentionView, groupIds, settings.dvirLookbackDays, settings.faultLookbackDays, groupsById, devicesById, usersById, readSnapshots, schedules]);
+  }, [insideMyGeotab, api, attentionView, groupIds, settings.dvirLookbackDays, settings.faultLookbackDays, groupsById, devicesById, usersById, readReadings, reminderRows]);
 
   useEffect(() => {
     if (tab !== "attention" || !insideMyGeotab) return;
@@ -288,9 +333,9 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   const ensureSnapshot = useCallback(
     async (deviceId: string): Promise<VehicleSnapshot | undefined> => {
       const have = snapshots.get(deviceId);
-      if (have) return have;
+      if (have && (have.odometerMeters != null || have.engineSeconds != null)) return have;
       try {
-        const got = await readSnapshots([deviceId], "Reading vehicle");
+        const got = await readReadings([deviceId], "Reading vehicle");
         return got.get(deviceId);
       } catch (e) {
         setNotice(`Couldn't read odometer / engine hours for this vehicle: ${friendlyError(e)}`);
@@ -299,7 +344,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         setProgress(null);
       }
     },
-    [snapshots, readSnapshots]
+    [snapshots, readReadings]
   );
 
   const startWorkOrder = useCallback(
@@ -333,22 +378,22 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
     [devicesById, ensureSnapshot, data.coverages, settings]
   );
 
-  const openWorkOrderByNumber = useCallback(
-    (n: number) => {
-      const wo = data.workOrders.find((w) => w.number === n);
-      if (wo) {
-        setEditor({ kind: "wo", draft: wo, isNew: false });
-      }
+  const openWorkOrder = useCallback(
+    (key: string) => {
+      const wo = allOrders.find((w) => woKey(w) === key);
+      if (!wo) return;
+      // A Geotab-only order has no AddInData record yet: evaluate warranty on open so the editor is useful.
+      const draft = wo.id ? wo : applyWarrantyEligibility(wo, data.coverages, snapshots.get(wo.deviceId), settings);
+      setEditor({ kind: "wo", draft, isNew: false });
     },
-    [data.workOrders]
+    [allOrders, data.coverages, snapshots, settings]
   );
 
-  const runSave = useCallback(async (fn: () => Promise<void>, ok: string) => {
+  const runSave = useCallback(async (fn: () => Promise<string>) => {
     setSaving(true);
     setNotice(null);
     try {
-      await fn();
-      setNotice(ok);
+      setNotice(await fn());
     } catch (e) {
       setNotice(`Save failed: ${friendlyError(e)}`);
     } finally {
@@ -356,42 +401,67 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
     }
   }, []);
 
+  /** Refresh one Geotab header in state after a write. */
+  const refreshGeotabOrder = useCallback(async (id: string) => {
+    const mc = mcRef.current;
+    if (!mc) return;
+    const [fresh, jobs] = await Promise.all([mc.getOrder(id), mc.getJobs(id).catch(() => [] as ReminderJob[])]);
+    setGeotab((g) => ({
+      ...g,
+      orders: fresh ? [fresh, ...g.orders.filter((o) => o.id !== id)] : g.orders.filter((o) => o.id !== id),
+      jobs: [...g.jobs.filter((j) => j.workOrderId !== id), ...jobs],
+    }));
+  }, []);
+
   const saveWorkOrder = useCallback(async () => {
     if (!editor || editor.kind !== "wo" || !storeRef.current) return;
     const store = storeRef.current;
+    const mc = mcRef.current;
     const now = new Date().toISOString();
     let wo: WorkOrder = { ...editor.draft, title: editor.draft.title.trim(), updatedAt: now, updatedBy: currentUser };
-    if (!wo.id) {
-      // Re-check the number against the latest list in case another user added one meanwhile.
+    if (!wo.id && !wo.geotab) {
       const taken = new Set(data.workOrders.map((w) => w.number));
       while (taken.has(wo.number)) wo = { ...wo, number: wo.number + 1 };
     }
     await runSave(async () => {
-      const saved = await store.saveWorkOrder(wo);
-      let scheduleUpdate: ServiceSchedule | null = null;
-      if (saved.status === "completed" && saved.source.type === "schedule" && saved.source.refId) {
-        const s = data.schedules.find((x) => x.id === saved.source.refId);
-        const before = data.workOrders.find((x) => x.id === saved.id);
-        if (s && before?.status !== "completed") scheduleUpdate = await store.saveSchedule(rollSchedule(s, saved));
+      let geotabNote = "";
+      if (syncOn && mc) {
+        const snap = snapshots.get(wo.deviceId);
+        const rule = wo.source.type === "schedule" && wo.source.refId ? geotab.rules.find((r) => r.id === wo.source.refId) ?? null : null;
+        try {
+          const warrantyNote = warrantyNoteFor(wo, data.coverages, snap, settings);
+          const res = wo.geotab ? await mc.update(wo, settings, snap, warrantyNote) : await mc.create(wo, settings, snap, rule, warrantyNote);
+          wo = { ...wo, geotab: { id: res.id, reference: res.reference, statusCode: res.statusCode, jobId: res.jobId } };
+          if (!wo.activity.some((a) => a.text.startsWith("Synced to MyGeotab"))) wo = { ...wo, activity: [...wo.activity, { at: now, by: currentUser, text: `Synced to MyGeotab Maintenance Center${res.reference ? ` as #${res.reference}` : ""}` }] };
+        } catch (e) {
+          // Keep the order in AddInData so nothing is lost; the list flags it as unsynced.
+          geotabNote = ` MyGeotab sync failed: ${friendlyError(e)} — saved in the add-in only; open and save again to retry.`;
+        }
       }
-      setData((d) => ({
-        ...d,
-        workOrders: [saved, ...d.workOrders.filter((w) => w.id !== saved.id)].sort((a, b) => b.number - a.number),
-        schedules: scheduleUpdate ? d.schedules.map((s) => (s.id === scheduleUpdate!.id ? scheduleUpdate! : s)) : d.schedules,
-      }));
+      const saved = await store.saveWorkOrder(wo);
+      setData((d) => ({ ...d, workOrders: [saved, ...d.workOrders.filter((w) => w.id !== saved.id)].sort((a, b) => b.number - a.number) }));
+      if (saved.geotab) await refreshGeotabOrder(saved.geotab.id);
       setEditor(null);
-    }, `Saved WO-${String(wo.number).padStart(5, "0")}.`);
-  }, [editor, currentUser, data.workOrders, data.schedules, runSave]);
+      return `Saved ${formatNumber(saved)}.${geotabNote}`;
+    });
+  }, [editor, currentUser, data.workOrders, data.coverages, runSave, syncOn, snapshots, geotab.rules, settings, refreshGeotabOrder]);
 
   const deleteWorkOrder = useCallback(async () => {
-    if (!editor || editor.kind !== "wo" || !editor.draft.id || !storeRef.current) return;
-    const id = editor.draft.id;
+    if (!editor || editor.kind !== "wo" || !storeRef.current) return;
+    const wo = editor.draft;
     await runSave(async () => {
-      await storeRef.current!.deleteWorkOrder(id);
-      setData((d) => ({ ...d, workOrders: d.workOrders.filter((w) => w.id !== id) }));
+      if (wo.geotab && syncOn && mcRef.current) {
+        await mcRef.current.remove(wo.geotab.id);
+        setGeotab((g) => ({ ...g, orders: g.orders.filter((o) => o.id !== wo.geotab!.id), jobs: g.jobs.filter((j) => j.workOrderId !== wo.geotab!.id) }));
+      }
+      if (wo.id) {
+        await storeRef.current!.deleteWorkOrder(wo.id);
+        setData((d) => ({ ...d, workOrders: d.workOrders.filter((w) => w.id !== wo.id) }));
+      }
       setEditor(null);
-    }, "Work order deleted.");
-  }, [editor, runSave]);
+      return `Deleted ${formatNumber(wo)}${wo.geotab && syncOn ? " here and in MyGeotab" : ""}.`;
+    });
+  }, [editor, runSave, syncOn]);
 
   const newCoverage = useCallback(
     (deviceId = "") => {
@@ -424,39 +494,12 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
     [devicesById, currentUser]
   );
 
-  const newSchedule = useCallback(
-    (deviceId = "") => {
-      const device = devicesById.get(deviceId);
-      const now = new Date().toISOString();
-      setEditor({
-        kind: "schedule",
-        isNew: true,
-        draft: {
-          deviceId,
-          deviceName: device?.name ?? "",
-          name: "",
-          category: "preventive",
-          intervalMeters: null,
-          intervalEngineSeconds: null,
-          intervalDays: null,
-          lastDoneAt: null,
-          lastDoneMeters: null,
-          lastDoneEngineSeconds: null,
-          notes: "",
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
-    },
-    [devicesById]
-  );
-
-  const changeEditorVehicle = useCallback(
+  const changeCoverageVehicle = useCallback(
     async (deviceId: string) => {
       const device = devicesById.get(deviceId);
       if (!device) return;
       await ensureSnapshot(deviceId);
-      setEditor((ed) => (ed && ed.kind !== "wo" ? ({ ...ed, draft: { ...ed.draft, deviceId, deviceName: device.name ?? deviceId } } as Editor) : ed));
+      setEditor((ed) => (ed && ed.kind === "coverage" ? { ...ed, draft: { ...ed.draft, deviceId, deviceName: device.name ?? deviceId } } : ed));
     },
     [devicesById, ensureSnapshot]
   );
@@ -468,7 +511,8 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       const saved = await storeRef.current!.saveCoverage(c);
       setData((d) => ({ ...d, coverages: [...d.coverages.filter((x) => x.id !== saved.id), saved] }));
       setEditor(null);
-    }, "Coverage saved.");
+      return "Coverage saved.";
+    });
   }, [editor, runSave]);
 
   const deleteCoverage = useCallback(async () => {
@@ -478,27 +522,8 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       await storeRef.current!.deleteCoverage(id);
       setData((d) => ({ ...d, coverages: d.coverages.filter((x) => x.id !== id) }));
       setEditor(null);
-    }, "Coverage deleted.");
-  }, [editor, runSave]);
-
-  const saveSchedule = useCallback(async () => {
-    if (!editor || editor.kind !== "schedule" || !storeRef.current) return;
-    const s = { ...editor.draft, name: editor.draft.name.trim(), updatedAt: new Date().toISOString() };
-    await runSave(async () => {
-      const saved = await storeRef.current!.saveSchedule(s);
-      setData((d) => ({ ...d, schedules: [...d.schedules.filter((x) => x.id !== saved.id), saved] }));
-      setEditor(null);
-    }, "Schedule saved.");
-  }, [editor, runSave]);
-
-  const deleteSchedule = useCallback(async () => {
-    if (!editor || editor.kind !== "schedule" || !editor.draft.id) return;
-    const id = editor.draft.id;
-    await runSave(async () => {
-      await storeRef.current!.deleteSchedule(id);
-      setData((d) => ({ ...d, schedules: d.schedules.filter((x) => x.id !== id) }));
-      setEditor(null);
-    }, "Schedule deleted.");
+      return "Coverage deleted.";
+    });
   }, [editor, runSave]);
 
   const exportCsv = useCallback(() => {
@@ -510,6 +535,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   // -------------------------------------------------------------------------
 
   const setSetting = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings((s) => ({ ...s, [k]: v }));
+  const codeInput = (value: number, onChange: (n: number) => void) => <input className="mwo-input mwo-input-sm" type="number" min={0} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)} style={{ width: 72 }} />;
 
   return (
     <div className="mwo-page">
@@ -517,8 +543,8 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         <div>
           <h2>Maintenance Work Orders</h2>
           <p>
-            Create and assign work orders from DVIR defects, fault codes, service schedules or by hand; track parts & labor, warranty eligibility and claims.
-            {insideMyGeotab ? " Stored in this database's Add-In Data." : " Standalone preview with demo data — nothing is saved."}
+            Work orders from DVIR defects, fault codes, MyGeotab reminders or by hand, with parts & labor, warranty eligibility and claims.
+            {insideMyGeotab ? (syncOn ? " Orders live in MyGeotab's Maintenance Center; parts, warranty and activity in this database's Add-In Data." : " Stored in this database's Add-In Data.") : " Standalone preview with demo data — nothing is saved."}
           </p>
         </div>
         <div className="mwo-actions">
@@ -580,13 +606,40 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
               <input className="mwo-input" type="number" min={0} value={Math.round(settings.units === "mi" ? settings.expiringMeters / 1609.344 : settings.expiringMeters / 1000)} onChange={(e) => setSetting("expiringMeters", Math.max(0, parseFloat(e.target.value) || 0) * (settings.units === "mi" ? 1609.344 : 1000))} />
             </label>
             <label className="mwo-field">
-              <span className="mwo-field-label">Service "due soon" at (% of interval)</span>
+              <span className="mwo-field-label">Reminder "due soon" at (% of interval)</span>
               <input className="mwo-input" type="number" min={50} max={100} value={Math.round(settings.dueSoonFraction * 100)} onChange={(e) => setSetting("dueSoonFraction", Math.min(1, Math.max(0.5, (parseInt(e.target.value, 10) || 90) / 100)))} />
             </label>
             <label className="mwo-field">
               <span className="mwo-field-label">API calls per minute (cap)</span>
               <input className="mwo-input" type="number" min={50} max={1000} value={settings.callsPerMinute} onChange={(e) => setSetting("callsPerMinute", Math.min(1000, Math.max(50, parseInt(e.target.value, 10) || 600)))} />
             </label>
+          </div>
+          <div className="mwo-card-head" style={{ marginTop: 14 }}>
+            <h3>MyGeotab Maintenance Center</h3>
+          </div>
+          <label className="mwo-toggle">
+            <input type="checkbox" checked={settings.syncToGeotab} onChange={(e) => setSetting("syncToGeotab", e.target.checked)} />
+            Use MyGeotab's Maintenance Center for work orders and reminders (undocumented API — switch off to run on Add-In Data alone). Takes effect on Refresh.
+          </label>
+          <p className="mwo-muted mwo-small">
+            Status / priority codes. <b>1 = open</b> and <b>5 = completed</b> are confirmed; the others are assumptions until checked against Maintenance Center. Set a status there, open the order here, and the raw code shows in the editor.
+          </p>
+          <div className="mwo-code-grid">
+            {(Object.keys(STATUS_LABEL) as WorkOrderStatus[]).map((st) => (
+              <label key={st} className="mwo-field">
+                <span className="mwo-field-label">{STATUS_LABEL[st]} → statusCode</span>
+                {codeInput(settings.statusCodeMap[st], (n) => setSetting("statusCodeMap", { ...settings.statusCodeMap, [st]: n }))}
+              </label>
+            ))}
+            {(Object.keys(PRIORITY_LABEL) as WorkOrderPriority[]).map((p) => (
+              <label key={p} className="mwo-field">
+                <span className="mwo-field-label">{PRIORITY_LABEL[p]} → priorityCode / severity</span>
+                <span className="mwo-actions">
+                  {codeInput(settings.priorityCodeMap[p], (n) => setSetting("priorityCodeMap", { ...settings.priorityCodeMap, [p]: n }))}
+                  {codeInput(settings.severityCodeMap[p], (n) => setSetting("severityCodeMap", { ...settings.severityCodeMap, [p]: n }))}
+                </span>
+              </label>
+            ))}
           </div>
         </div>
       ) : null}
@@ -595,6 +648,17 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         {error ? (
           <Banner type="error" header="Couldn't load">
             {error}
+          </Banner>
+        ) : null}
+        {settings.syncToGeotab && geotab.error ? (
+          <Banner type="warning" header="MyGeotab Maintenance Center not reachable — running on Add-In Data only">
+            {geotab.error} Work orders you save now stay in the add-in (flagged "unsynced") and can be synced later.
+          </Banner>
+        ) : null}
+        {merged.orphaned.length ? (
+          <Banner type="warning" header={`${merged.orphaned.length} add-in record${merged.orphaned.length === 1 ? "" : "s"} point to Maintenance Center orders that no longer exist`}>
+            {merged.orphaned.map((w) => w.title || formatNumber(w)).slice(0, 5).join(" · ")}
+            {merged.orphaned.length > 5 ? " …" : ""} — they were deleted in MyGeotab; their parts / warranty / activity are still in Add-In Data.
           </Banner>
         ) : null}
         {notice ? (
@@ -612,35 +676,19 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
             ) : null}
           </div>
         ) : null}
-        {pendingSnapshots.length ? (
-          <Banner
-            type="info"
-            header={`${pendingSnapshots.length.toLocaleString()} vehicles have warranties or schedules — readings not loaded automatically`}
-            action={{
-              text: "Read odometer & engine hours now",
-              onClick: () => {
-                const ids = pendingSnapshots;
-                setPendingSnapshots([]);
-                void readSnapshots(ids).catch((e) => setNotice(friendlyError(e))).finally(() => setProgress(null));
-              },
-            }}
-          >
-            That's {pendingSnapshots.length * 2} API calls — about {Math.ceil((pendingSnapshots.length * 2) / settings.callsPerMinute)} min at the current cap. Warranty and schedule status show as Unknown until then.
-          </Banner>
-        ) : null}
       </div>
 
       <div className="mwo-tabs-scroll">
-      <Tabs
-        tabs={[
-          { id: "orders", name: "Work orders", quantity: workOrders.filter((w) => w.status !== "completed" && w.status !== "cancelled").length },
-          { id: "attention", name: "Needs attention", quantity: (dvirRows?.filter((d) => d.openWorkOrderNumber == null).length ?? 0) + (faultRows?.filter((f) => f.openWorkOrderNumber == null).length ?? 0) + dueRows.filter((d) => d.evaluation.openWorkOrderNumber == null).length },
-          { id: "warranty", name: "Warranty", quantity: coverages.length },
-          { id: "schedules", name: "Service schedules", quantity: schedules.length },
-        ]}
-        activeTabId={tab}
-        onTabChange={(id) => setTab(id as MainTab)}
-      />
+        <Tabs
+          tabs={[
+            { id: "orders", name: "Work orders", quantity: workOrders.filter((w) => w.status !== "completed" && w.status !== "cancelled").length },
+            { id: "attention", name: "Needs attention", quantity: (dvirRows?.filter((d) => !d.openWorkOrderKey).length ?? 0) + (faultRows?.filter((f) => !f.openWorkOrderKey).length ?? 0) + dueRows.filter((d) => !d.openWorkOrderId).length },
+            { id: "warranty", name: "Warranty", quantity: coverages.length },
+            { id: "reminders", name: "Reminders", quantity: geotab.rules.filter((r) => r.active).length },
+          ]}
+          activeTabId={tab}
+          onTabChange={(id) => setTab(id as MainTab)}
+        />
       </div>
 
       <ErrorBoundary label="page">
@@ -659,7 +707,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
                 Export CSV
               </Button>
             </div>
-            <WorkOrderTable rows={visibleOrders} settings={settings} session={session} busy={loading} onOpen={(wo) => setEditor({ kind: "wo", draft: wo, isNew: false })} />
+            <WorkOrderTable rows={visibleOrders} settings={settings} session={session} busy={loading} syncOn={syncOn} onOpen={(wo) => openWorkOrder(woKey(wo))} />
           </>
         ) : null}
 
@@ -676,20 +724,34 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
             session={session}
             insideMyGeotab={insideMyGeotab}
             onRefresh={() => void refreshIntake()}
-            onOpenWorkOrder={openWorkOrderByNumber}
+            onOpenWorkOrder={openWorkOrder}
             onCreateFromDvir={(item) => void startWorkOrder(item.deviceId, (wo) => fromDvirDefect(wo, item))}
             onCreateFromFault={(item) => void startWorkOrder(item.deviceId, (wo) => fromFault(wo, item))}
-            onCreateFromSchedule={(s) => void startWorkOrder(s.deviceId, (wo) => fromSchedule(wo, s))}
-            workOrders={data.workOrders}
+            onCreateFromReminder={(row) => void startWorkOrder(row.deviceId, (wo) => fromReminder(wo, row.rule))}
+            workOrders={allOrders}
           />
         ) : null}
 
         {tab === "warranty" ? (
-          <WarrantyTab coverages={coverages} workOrders={data.workOrders} snapshots={snapshots} devices={scopedDevices} settings={settings} session={session} busy={loading} onNew={() => newCoverage()} onEdit={(c) => setEditor({ kind: "coverage", draft: c, isNew: false })} onOpenWorkOrder={openWorkOrderByNumber} />
+          <WarrantyTab coverages={coverages} workOrders={allOrders} snapshots={snapshots} devices={scopedDevices} settings={settings} session={session} busy={loading} onNew={() => newCoverage()} onEdit={(c) => setEditor({ kind: "coverage", draft: c, isNew: false })} onOpenWorkOrder={openWorkOrder} />
         ) : null}
 
-        {tab === "schedules" ? (
-          <SchedulesTab schedules={schedules} workOrders={data.workOrders} snapshots={snapshots} settings={settings} session={session} busy={loading} onNew={() => newSchedule()} onEdit={(s) => setEditor({ kind: "schedule", draft: s, isNew: false })} onCreateWorkOrder={(s) => void startWorkOrder(s.deviceId, (wo) => fromSchedule(wo, s))} />
+        {tab === "reminders" ? (
+          <RemindersTab
+            rules={geotab.rules}
+            rows={reminderRows}
+            workOrders={allOrders}
+            groupsById={groupsById}
+            settings={settings}
+            session={session}
+            busy={loading}
+            available={syncOn}
+            error={geotab.error ?? (!settings.syncToGeotab ? "MyGeotab sync is switched off in Settings." : null)}
+            readingsPending={readingsPending}
+            onReadReadings={() => void readReadings(reminderRows.map((r) => r.deviceId)).finally(() => setProgress(null))}
+            onCreateWorkOrder={(row) => void startWorkOrder(row.deviceId, (wo) => fromReminder(wo, row.rule))}
+            onOpenWorkOrder={openWorkOrder}
+          />
         ) : null}
       </ErrorBoundary>
 
@@ -706,6 +768,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
             settings={settings}
             currentUser={currentUser}
             session={session}
+            geotabSync={syncOn}
             onChange={(next) => setEditor((ed) => (ed && ed.kind === "wo" ? { ...ed, draft: next } : ed))}
             onChangeVehicle={(id) => void changeWorkOrderVehicle(id)}
             onSave={() => void saveWorkOrder()}
@@ -716,12 +779,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       ) : null}
       {editor?.kind === "coverage" ? (
         <ErrorBoundary label="coverage editor">
-          <CoveragePanel draft={editor.draft} isNew={editor.isNew} saving={saving} devices={scopedDevices.length ? scopedDevices : devices} snapshots={snapshots} settings={settings} onChange={(next) => setEditor((ed) => (ed && ed.kind === "coverage" ? { ...ed, draft: next } : ed))} onChangeVehicle={(id) => void changeEditorVehicle(id)} onSave={() => void saveCoverage()} onDelete={() => void deleteCoverage()} onClose={() => setEditor(null)} />
-        </ErrorBoundary>
-      ) : null}
-      {editor?.kind === "schedule" ? (
-        <ErrorBoundary label="schedule editor">
-          <SchedulePanel draft={editor.draft} isNew={editor.isNew} saving={saving} devices={scopedDevices.length ? scopedDevices : devices} snapshots={snapshots} settings={settings} onChange={(next) => setEditor((ed) => (ed && ed.kind === "schedule" ? { ...ed, draft: next } : ed))} onChangeVehicle={(id) => void changeEditorVehicle(id)} onSave={() => void saveSchedule()} onDelete={() => void deleteSchedule()} onClose={() => setEditor(null)} />
+          <CoveragePanel draft={editor.draft} isNew={editor.isNew} saving={saving} devices={scopedDevices.length ? scopedDevices : devices} snapshots={snapshots} settings={settings} onChange={(next) => setEditor((ed) => (ed && ed.kind === "coverage" ? { ...ed, draft: next } : ed))} onChangeVehicle={(id) => void changeCoverageVehicle(id)} onSave={() => void saveCoverage()} onDelete={() => void deleteCoverage()} onClose={() => setEditor(null)} />
         </ErrorBoundary>
       ) : null}
     </div>

@@ -158,6 +158,7 @@ export function migrateWorkOrder(wo: WorkOrder): WorkOrder {
       claim: { status: "none", claimNumber: "", submittedAt: null, resolvedAt: null, amountClaimed: null, amountRecovered: null, notes: "" },
     },
     source: wo.source ?? { type: "manual", label: "Manual" },
+    geotab: wo.geotab ?? null,
   };
 }
 

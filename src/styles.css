@@ -257,3 +257,22 @@ html, body, #root { margin: 0; padding: 0; height: 100%; }
   .mwo-row:hover td { background: inherit; }
   .mwo-row:active td { background: #f3f4f6; }
 }
+
+/* ---- Reminders (rule accordion) ---- */
+.mwo-rule { border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 8px; background: #fff; overflow: hidden; }
+.mwo-rule-head {
+  all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%;
+  padding: 10px 12px; cursor: pointer; font: inherit; color: var(--gpsfms-dark); min-height: 44px;
+}
+.mwo-rule-head:hover { background: #f9fafb; }
+.mwo-rule-head:focus-visible { outline: 2px solid var(--gpsfms-blue); outline-offset: -2px; }
+.mwo-rule-chevron { color: #6b7280; width: 12px; }
+.mwo-rule-name { font-weight: 600; }
+.mwo-rule .mwo-table-wrap { border: 0; border-top: 1px solid #e5e7eb; border-radius: 0; }
+.mwo-rule .mwo-empty { margin: 8px; }
+
+.mwo-sync-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mwo-pill-small { font-size: 10px; padding: 0 6px; margin-left: 6px; font-weight: 500; }
+.mwo-code-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; margin-top: 8px; }
+.mwo-note-preview { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; }
+.mwo-note-preview pre { margin: 4px 0 0; font: inherit; font-size: 13px; white-space: pre-wrap; color: var(--gpsfms-dark); }

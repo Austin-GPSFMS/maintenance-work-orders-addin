@@ -197,6 +197,8 @@ export interface WorkOrderSource {
   defectId?: string;
   /** Diagnostic id, for faults. */
   diagnosticId?: string;
+  /** Geotab maintenanceType id (reminder rule's type), for schedule-sourced orders. */
+  maintenanceTypeId?: string;
   /** Short human label ("DVIR 2026-10-20 — Brakes: Air pressure low"). */
   label: string;
 }
@@ -260,6 +262,19 @@ export interface WorkOrder {
   lines: LineItem[];
   warranty: WorkOrderWarranty;
   activity: ActivityEntry[];
+  /** Link to Geotab's Maintenance Center order (null = not synced / sync failed). */
+  geotab: GeotabLink | null;
+}
+
+export interface GeotabLink {
+  /** MaintenanceWorkOrder id. */
+  id: string;
+  /** Geotab's sequential reference ("000161"); the display number when linked. */
+  reference: string;
+  /** Raw statusCode last seen on the Geotab record. */
+  statusCode: number;
+  /** MaintenanceWorkOrderJob id created for a reminder, when any. */
+  jobId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +321,144 @@ export interface CoverageEvaluation {
 }
 
 // ---------------------------------------------------------------------------
-// Service schedules (the add-in's own maintenance reminders)
+// Geotab Maintenance Center (undocumented API — see tools/probe_*.py and
+// the project note "Geotab Maintenance Center — undocumented API findings")
+// ---------------------------------------------------------------------------
+
+/** Raw MaintenanceSchedule as MyGeotab returns it (fields we read). */
+export interface GeotabMaintenanceSchedule {
+  id: string;
+  name?: string;
+  active?: boolean;
+  comment?: string;
+  source?: string; // "manual" | "Data Insight"
+  groups?: Array<{ id: string }>;
+  labels?: string[];
+  kilometers?: number | null;
+  months?: number | null;
+  days?: number | null;
+  eventDate?: string | null;
+  eventType?: { id: string } | string;
+  maintenanceType?: GeotabMaintenanceType;
+  version?: string;
+}
+
+export interface GeotabMaintenanceType {
+  id: string;
+  name?: string;
+  source?: string;
+  customSource?: string;
+  sourceType?: string; // "Scheduled" | "DataInsight" | "Manual"
+  createdBy?: { id: string } | string;
+  labels?: string[];
+  defect?: { id: string; isDefectList?: boolean };
+  activeFrom?: string;
+  activeTo?: string;
+  version?: string;
+}
+
+/** Raw MaintenanceWorkOrder (fields we read / write). */
+export interface GeotabMaintenanceWorkOrder {
+  id: string;
+  reference?: string;
+  device?: { id: string; name?: string; groups?: Array<{ id: string }> };
+  dateTime?: string;
+  updatedDate?: string;
+  statusCode?: number;
+  priorityCode?: number;
+  notes?: string | null;
+  odometerReading?: number;
+  engineHoursReading?: string;
+  engineHoursReadingInHours?: number;
+  completedDateTime?: string | null;
+  assignedTo?: { id: string; name?: string } | string | null;
+  zone?: { id: string } | null;
+  repairReason?: number | null;
+  repairClass?: number | null;
+  costCurrency?: string;
+  totalCost?: number;
+  laborCost?: number;
+  partsCost?: number;
+  taxCost?: number;
+  shippingCost?: number;
+  miscCost?: number;
+  taxAddedToTotal?: boolean;
+  mediaFiles?: unknown[];
+  openedByUser?: { id: string; name?: string } | string;
+  version?: string;
+}
+
+/** Raw MaintenanceWorkOrderJob. */
+export interface GeotabMaintenanceJob {
+  id: string;
+  workOrder?: { id: string };
+  schedule?: { id: string };
+  device?: { id: string; name?: string };
+  maintenanceType?: GeotabMaintenanceType;
+  statusCode?: number;
+  severityCode?: number;
+  triggeredDate?: string;
+  dateTime?: string;
+  odometerReading?: number;
+  engineHoursReading?: string;
+  engineHoursReadingInHours?: number;
+  laborCosts?: number;
+  partsCost?: number;
+  version?: string;
+}
+
+/** Normalized reminder rule (from MaintenanceSchedule). */
+export interface ReminderRule {
+  id: string;
+  name: string;
+  active: boolean;
+  /** "manual" rules only; Geotab's Data Insight rules are filtered out. */
+  source: string;
+  groupIds: string[];
+  labels: string[];
+  intervalMeters: number | null;
+  intervalDays: number | null;
+  intervalMonths: number | null;
+  /** One-off due date. */
+  eventDate: string | null;
+  maintenanceTypeId: string | null;
+  maintenanceTypeName: string;
+  /** Raw maintenanceType, replayed into a job when a work order is created. */
+  maintenanceType: GeotabMaintenanceType | null;
+}
+
+/** Normalized job. */
+export interface ReminderJob {
+  id: string;
+  workOrderId: string;
+  scheduleId: string | null;
+  deviceId: string;
+  maintenanceTypeId: string | null;
+  maintenanceTypeName: string;
+  defectId: string | null;
+  statusCode: number;
+  severityCode: number;
+  triggeredDate: string | null;
+  odometerMeters: number | null;
+  engineSeconds: number | null;
+}
+
+/** One reminder applied to one vehicle. */
+export interface ReminderVehicleRow {
+  key: string;
+  rule: ReminderRule;
+  deviceId: string;
+  deviceName: string;
+  evaluation: ScheduleEvaluation;
+  /** Last completed job for this rule + vehicle (what "last done" came from). */
+  lastDone: { at: string | null; odometerMeters: number | null; engineSeconds: number | null } | null;
+  openWorkOrderId: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Service schedules — now only the evaluation input shape built from a
+// ReminderRule + the vehicle's last completed job (the add-in no longer
+// stores its own schedules)
 // ---------------------------------------------------------------------------
 
 export interface ServiceSchedule {
@@ -354,7 +506,8 @@ export interface DvirDefectItem {
   remarks: string;
   isSafeToOperate: boolean | null;
   repairStatus: string;
-  openWorkOrderNumber: number | null;
+  /** woKey() of an active order already created from this defect. */
+  openWorkOrderKey: string | null;
 }
 
 export interface FaultItem {
@@ -373,7 +526,7 @@ export interface FaultItem {
   description: string;
   recommendation: string;
   lamps: string[];
-  openWorkOrderNumber: number | null;
+  openWorkOrderKey: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +547,14 @@ export interface Settings {
   dueSoonFraction: number;
   callsPerMinute: number;
   laborRate: number;
+  /** Write orders to Geotab's Maintenance Center (MaintenanceWorkOrder) and list its orders. */
+  syncToGeotab: boolean;
+  /** Add-in status → Geotab statusCode. 1 = open and 5 = completed are confirmed; the rest are editable guesses. */
+  statusCodeMap: Record<WorkOrderStatus, number>;
+  /** Add-in priority → Geotab priorityCode (100 is Geotab's default). */
+  priorityCodeMap: Record<WorkOrderPriority, number>;
+  /** Add-in priority → job severityCode (0 / 100 / 200 seen on pilot). */
+  severityCodeMap: Record<WorkOrderPriority, number>;
 }
 
 export interface Progress {
@@ -404,5 +565,6 @@ export interface Progress {
 export interface StoreData {
   workOrders: WorkOrder[];
   coverages: WarrantyCoverage[];
+  /** Legacy add-in schedules (pre-Maintenance-Center builds); read for migration only. */
   schedules: ServiceSchedule[];
 }

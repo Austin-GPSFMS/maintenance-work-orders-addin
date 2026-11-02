@@ -1,0 +1,393 @@
+{
+  "database": "gpsfms_pilot",
+  "at": "2026-10-28T17:02:32.605405+00:00",
+  "results": [
+    {
+      "kind": "type",
+      "name": "Reminder",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "Reminders",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ReminderRule",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ReminderStatus",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ReminderTemplate",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceReminder",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceReminderRule",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceReminderStatus",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceRule",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceRecord",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceSchedule",
+      "status": "EXISTS",
+      "detail": "5 rows; fields: active, comment, dateTime, eventDate, eventType, groups, id, labels, maintenanceType, name, notificationTemplate, source, version"
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceItem",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceTask",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceEvent",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceLog",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceTemplate",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceWorkOrder",
+      "status": "EXISTS",
+      "detail": "5 rows; fields: completedDateTime, costCurrency, currencyConversionFailed, dateTime, device, engineHoursReading, engineHoursReadingInHours, id, mediaFiles, notes, odometerReading, openedByUser, priorityCode, reference"
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceVendor",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceStatus",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "MaintenanceCenter",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ServiceReminder",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ServiceRecord",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ServiceSchedule",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ServiceInterval",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "WorkOrder",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "WorkOrders",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "WorkOrderType",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "WorkOrderStatus",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "Repair",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "RepairOrder",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "VehicleMaintenance",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "AssetMaintenance",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "Vendor",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "Part",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "PartsInventory",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "Device",
+      "status": "EXISTS",
+      "detail": "5 rows; fields: accelerationWarningThreshold, accelerometerThresholdWarningFactor, activeFrom, activeTo, autoGroups, auxWarningSpeed, brakingWarningThreshold, comment, corneringWarningThreshold, customParameters, customProperties, deviceFlags, devicePlanBillingInfo, devicePlans"
+    },
+    {
+      "kind": "type",
+      "name": "Rule",
+      "status": "EXISTS",
+      "detail": "5 rows; fields: activeFrom, activeTo, baseType, color, comment, condition, groups, id, monitors, name, reason, state, version"
+    },
+    {
+      "kind": "type",
+      "name": "DVIRLog",
+      "status": "EXISTS",
+      "detail": "5 rows; fields: authorityAddress, authorityName, certifyRemark, dateTime, defectList, driver, driverRemark, duration, id, isInspectedByDriver, isRejected, location, logType, trailer"
+    },
+    {
+      "kind": "type",
+      "name": "Defect",
+      "status": "ERROR",
+      "detail": "NotSupportedException\nThe type 'Defect' is not supported for this operation. Please provide an instance of type 'Group'."
+    },
+    {
+      "kind": "type",
+      "name": "AddInData",
+      "status": "EXISTS/DENIED",
+      "detail": "InvalidPermissionsException\nAction not supported for non system user."
+    },
+    {
+      "kind": "type",
+      "name": "User",
+      "status": "EXISTS",
+      "detail": "5 rows; fields: acceptedEULA, activeDashboardReports, activeDefaultDashboards, activeFrom, activeTo, authorityAddress, authorityName, availableDashboardReports, bookmarks, cannedResponseOptions, carrierNumber, changePassword, comment, companyAddress"
+    },
+    {
+      "kind": "type",
+      "name": "Inspection",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "InspectedItem",
+      "status": "EXISTS",
+      "detail": "0 rows (type exists)"
+    },
+    {
+      "kind": "type",
+      "name": "DefectList",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "AssetProfile",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "ServiceAlert",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "type",
+      "name": "DeviceReminder",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'Get' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetReminders",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetReminders' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceReminders",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceReminders' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceRecords",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceRecords' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceRules",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceRules' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceSchedules",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceSchedules' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetUpcomingMaintenance",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetUpcomingMaintenance' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetDueMaintenance",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetDueMaintenance' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceDue",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceDue' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceRemindersDue",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceRemindersDue' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetReminderStatus",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetReminderStatus' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetWorkOrders",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetWorkOrders' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetServiceReminders",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetServiceReminders' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceCenterSummary",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceCenterSummary' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetMaintenanceSummary",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetMaintenanceSummary' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetVehicleMaintenanceStatus",
+      "status": "UNKNOWN",
+      "detail": "MissingMethodException\nThe method 'GetVehicleMaintenanceStatus' could not be found. Verify the method name and ensure all method parameters are included."
+    },
+    {
+      "kind": "method",
+      "name": "GetVersionInformation",
+      "status": "EXISTS",
+      "detail": "object; fields: application, database, deploymentType, goTalk, imageTag, isUniqueServerId, server, serverFlags, serverId"
+    },
+    {
+      "kind": "rule-basetypes",
+      "name": "Rule.baseType",
+      "status": "EXISTS",
+      "detail": {
+        "Custom": 59,
+        "Stock": 24
+      }
+    }
+  ]
+}
