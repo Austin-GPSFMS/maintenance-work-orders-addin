@@ -11,6 +11,9 @@ import { vehicleLink } from "./WorkOrderTable";
 
 export type AttentionView = "dvir" | "faults" | "due";
 
+/** Rows rendered in the Reminders due queue (the full list lives on the Reminders tab). */
+const DUE_ROWS_MAX = 300;
+
 interface Props {
   view: AttentionView;
   onView: (v: AttentionView) => void;
@@ -57,9 +60,9 @@ export function AttentionTab(props: Props) {
         <div className="mwo-tabs-scroll">
         <Tabs
           tabs={[
-            { id: "dvir", name: "DVIR defects", quantity: dvir?.length ?? 0 },
-            { id: "faults", name: "Active faults", quantity: faults?.length ?? 0 },
-            { id: "due", name: "Reminders due", quantity: overdueCount + dueSoonCount },
+            { id: "dvir", name: "DVIR defects", quantity: dvir?.length || undefined },
+            { id: "faults", name: "Active faults", quantity: faults?.length || undefined },
+            { id: "due", name: "Reminders due", quantity: overdueCount + dueSoonCount || undefined },
           ]}
           activeTabId={view}
           onTabChange={(id) => onView(id as AttentionView)}
@@ -203,7 +206,7 @@ export function AttentionTab(props: Props) {
                 </tr>
               </thead>
               <tbody>
-                {due.map((r) => (
+                {due.slice(0, DUE_ROWS_MAX).map((r) => (
                   <tr key={r.key} className={r.evaluation.state === "overdue" ? "mwo-row-critical" : r.evaluation.state === "due_soon" ? "mwo-row-high" : ""}>
                     <td>
                       <Asset session={session} id={r.deviceId} name={r.deviceName} />
@@ -238,6 +241,7 @@ export function AttentionTab(props: Props) {
                 ))}
               </tbody>
             </table>
+            {due.length > DUE_ROWS_MAX ? <div className="mwo-table-foot">Showing the {DUE_ROWS_MAX} most overdue of {due.length.toLocaleString()} — the Reminders tab has the full list per rule.</div> : null}
           </div>
         )
       ) : null}

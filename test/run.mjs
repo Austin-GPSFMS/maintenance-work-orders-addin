@@ -205,5 +205,14 @@ check("vehiclesInAnyRule: company-wide rule returns every vehicle", m.vehiclesIn
   check("splitNotes also strips legacy trailing Source:/Vendor: lines", m.splitNotes("Oil change\n\nDue per reminder.\n\nSource: DVIR 2026-10-20\nVendor: Shop").description === "Due per reminder.");
 }
 
+
+// ---- Live-run fixes (gpsfms_pilot, 2026-11-09) ----
+check("stringList flattens arrays, comma strings, flag objects and nulls", JSON.stringify([m.stringList(["Active", "Pending"]), m.stringList("Active, Pending"), m.stringList({ active: true, pending: false, effectiveStatus: "Confirmed" }), m.stringList(null), m.stringList(3)]) === JSON.stringify([["active", "pending"], ["active", "pending"], ["active", "confirmed"], [], ["3"]]));
+check("isFaultActive: array / string / object / missing shapes", m.isFaultActive("Active", undefined) && m.isFaultActive(undefined, { active: true }) && m.isFaultActive(undefined, "Pending, Active") && m.isFaultActive(undefined, undefined) && !m.isFaultActive("Cleared", undefined) && !m.isFaultActive(undefined, ["Inactive"]) && !m.isFaultActive("None", {}) && m.isFaultActive(undefined, { testFailed: true }));
+{
+  const lapsed = m.buildReminderRows({ rules: [{ ...rule, intervalMeters: null, eventDate: "2021-10-04" }], devices: [devices.get("d1"), devices.get("d2")], expand, jobs: [], geotabById: new Map(), snapshots: snaps, settings: S2, now });
+  check("one-off reminder years past with nothing recorded lapses instead of flagging the fleet overdue", lapsed.every((r) => r.evaluation.state === "unknown" && /lapsed/.test(r.evaluation.reasons[0])), JSON.stringify(lapsed[0].evaluation));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -426,6 +426,36 @@ export async function resolveDiagnostics(
 // ---------------------------------------------------------------------------
 
 /**
+ * Flatten whatever MyGeotab sends for a "list of states" into lower-case
+ * strings. Seen / possible shapes: ["Active", ...], "Active, Pending",
+ * { effectiveStatus: "Active" }, { active: true, pending: false }, null.
+ */
+export function stringList(v: unknown): string[] {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.flatMap((x) => stringList(x));
+  if (typeof v === "string") return v.split(/[,|;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (typeof v === "number" || typeof v === "boolean") return [String(v).toLowerCase()];
+  if (typeof v === "object") {
+    const out: string[] = [];
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (val === true) out.push(k.toLowerCase());
+      else if (typeof val === "string") out.push(...stringList(val));
+    }
+    return out;
+  }
+  return [];
+}
+
+/** Active unless the record clearly says otherwise (cleared / inactive / none). */
+export function isFaultActive(faultState: unknown, faultStates: unknown): boolean {
+  const all = [...stringList(faultState), ...stringList(faultStates)];
+  if (all.length === 0) return true;
+  if (all.some((s) => s === "active" || s.endsWith("active") && !s.includes("inactive") && !s.includes("notactive"))) return true;
+  if (all.some((s) => s.includes("inactive") || s.includes("cleared") || s === "none" || s.includes("notactive"))) return false;
+  return all.some((s) => s.includes("pending") || s.includes("confirmed") || s.includes("failed"));
+}
+
+/**
  * FaultData in the look-back window for the selected groups, reduced to the
  * latest record per device + diagnostic whose state is still Active and that
  * nobody has dismissed. Fleet-wide fault volume can be large, so the window
@@ -457,12 +487,10 @@ export async function fetchActiveFaults(
     const cur = latest.get(key);
     if (!cur || timeOf(f.dateTime) > timeOf(cur.dateTime)) latest.set(key, f);
   }
+  if (rows.length) console.info("[MWO] FaultData sample (faultState / faultStates):", rows[0].faultState, rows[0].faultStates);
   const kept: GeotabFaultData[] = [];
   latest.forEach((f) => {
-    const state = String(f.faultState ?? "").toLowerCase();
-    const states = (f.faultStates ?? []).map((s) => String(s).toLowerCase());
-    const active = state === "active" || states.includes("active") || (state === "" && states.length === 0);
-    if (!active || f.dismissDateTime) return;
+    if (!isFaultActive(f.faultState, f.faultStates) || f.dismissDateTime) return;
     if (!devicesById.has(f.device!.id)) return;
     kept.push(f);
   });

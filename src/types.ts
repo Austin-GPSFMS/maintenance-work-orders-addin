@@ -127,7 +127,8 @@ export interface GeotabFaultData {
   controller?: { id: string; name?: string };
   failureMode?: { id: string; name?: string; code?: number };
   faultState?: string; // None | Pending | Active | Cleared
-  faultStates?: string[];
+  /** Shape varies by server build: array, comma string, or a flags object — parsed with stringList(). */
+  faultStates?: unknown;
   count?: number;
   severity?: string;
   dismissDateTime?: string;

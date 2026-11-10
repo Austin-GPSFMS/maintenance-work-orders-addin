@@ -207,6 +207,8 @@ export interface ReminderBuildInput {
 }
 
 const DAYS_PER_MONTH = 30.4375;
+/** A one-off reminder counts as overdue for this long after its date, then lapses. */
+export const ONE_OFF_GRACE_DAYS = 60;
 
 function evaluateOneOff(eventDate: string, lastDoneAt: string | null, settings: Settings, now: Date): ScheduleEvaluation {
   const due = parseDate(eventDate);
@@ -215,6 +217,8 @@ function evaluateOneOff(eventDate: string, lastDoneAt: string | null, settings: 
     return { state: "ok", reasons: [`Done ${new Date(lastDoneAt).toLocaleDateString()} for the ${due.toLocaleDateString()} event`], progress: 1, openWorkOrderNumber: null };
   }
   const left = daysBetween(now, due);
+  // A one-off date that passed long ago with nothing recorded is a stale rule, not 2,800 overdue vehicles.
+  if (left < -ONE_OFF_GRACE_DAYS) return { state: "unknown", reasons: [`One-off date ${due.toLocaleDateString()} passed ${-left} days ago — treated as lapsed`], progress: null, openWorkOrderNumber: null };
   if (left < 0) return { state: "overdue", reasons: [`${-left} days past ${due.toLocaleDateString()}`], progress: 1 + -left / 365, openWorkOrderNumber: null };
   const soon = Math.round((1 - settings.dueSoonFraction) * 365);
   return { state: left <= Math.max(14, soon) ? "due_soon" : "ok", reasons: [`${left} days until ${due.toLocaleDateString()}`], progress: Math.max(0, 1 - left / 365), openWorkOrderNumber: null };

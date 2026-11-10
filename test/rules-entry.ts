@@ -7,3 +7,4 @@ export * from "../src/utils/format";
 export * from "../src/utils/geotabMerge";
 export { normalizeSchedule, normalizeJob, isUserReminder, timeSpanToSeconds, secondsToTimeSpan, composeNotes, splitNotes, NOTES_MARKER } from "../src/api/maintenanceCenter";
 export { DEFAULT_SETTINGS } from "../src/utils/storage";
+export { stringList, isFaultActive } from "../src/api/geotab";

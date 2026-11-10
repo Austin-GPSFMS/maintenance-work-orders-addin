@@ -95,8 +95,8 @@ export function RemindersTab({ rules, rows, workOrders, groupsById, settings, se
         These are the reminder rules from MyGeotab (Maintenance → Reminders), applied to every vehicle in each rule's groups. "Last done" is the vehicle's last completed Maintenance Center job for that rule; due state compares the interval with the live odometer / hours. Edit the rules in MyGeotab — Geotab's Oil Life / ESR insights are not listed.
       </p>
       {readingsPending > 0 ? (
-        <Banner type="info" header={`${readingsPending.toLocaleString()} vehicles still need an odometer / engine-hours reading`} action={{ text: "Read readings now", onClick: onReadReadings }}>
-          Distance-based reminders show as Unknown for them until the readings are loaded.
+        <Banner type="info" header={`${readingsPending.toLocaleString()} vehicles with a service on record haven't reported an odometer in the last 14 days`} action={{ text: `Look ${readingsPending > 300 ? "the first 300" : "them"} up`, onClick: onReadReadings }}>
+          Their distance-based reminders show as Unknown until their last known odometer is looked up (2 API calls per vehicle).
         </Banner>
       ) : null}
       {rules.length === 0 ? (

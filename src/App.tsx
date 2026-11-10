@@ -48,6 +48,7 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./utils/storage";
 import { applyWarrantyEligibility, createWorkOrder, downloadText, formatNumber, fromDvirDefect, fromFault, fromReminder, matchesSearch, matchesView, PRIORITY_LABEL, STATUS_LABEL, VIEW_LABEL, woKey, workOrdersCsv, type ViewFilter } from "./utils/workorders";
 import { todayIso } from "./utils/format";
 import { warrantyNoteFor } from "./utils/warranty";
+import { useFitToViewport } from "./utils/viewport";
 import { AttentionTab, type AttentionView } from "./components/AttentionTab";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GroupFilterPicker } from "./components/GroupFilterPicker";
@@ -76,6 +77,9 @@ interface GeotabState {
   available: boolean;
   error: string | null;
 }
+
+/** Zenith Tabs print a bare "0" next to the label ("Warranty0") — omit the badge instead. */
+export const badge = (n: number): number | undefined => (n > 0 ? n : undefined);
 
 const EMPTY: StoreData = { workOrders: [], coverages: [], schedules: [] };
 const EMPTY_GEOTAB: GeotabState = { rules: [], orders: [], jobs: [], available: false, error: null };
@@ -111,6 +115,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   const [intakeError, setIntakeError] = useState<string | null>(null);
   const [readingsDone, setReadingsDone] = useState(false);
 
+  const pageRef = useFitToViewport<HTMLDivElement>();
   const pacerRef = useRef(new Pacer(settings.callsPerMinute));
   const storeRef = useRef<Store | null>(null);
   const mcRef = useRef<MaintenanceClient | null>(null);
@@ -138,7 +143,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
 
   /** Fleet-wide sweep (few calls) for many vehicles; per-device for one or two. */
   const readReadings = useCallback(
-    async (ids: string[], label = "Reading odometer & engine hours") => {
+    async (ids: string[], label = "Reading odometer & engine hours", deepMax = DEEP_LOOKUP_MAX) => {
       const todo = Array.from(new Set(ids)).filter((id) => devicesRef.current.has(id));
       if (!todo.length) return new Map<string, VehicleSnapshot>();
       if (!insideMyGeotab) {
@@ -151,7 +156,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
         return m;
       }
       const onProgress = (text: string, pct: number | null) => setProgress({ text: `${label}: ${text}`, pct });
-      const got = todo.length <= 10 ? await fetchSnapshots(api!, todo, pacerRef.current, onProgress) : await sweepSnapshots(api!, todo, pacerRef.current, onProgress, DEEP_LOOKUP_MAX);
+      const got = todo.length <= 10 ? await fetchSnapshots(api!, todo, pacerRef.current, onProgress) : await sweepSnapshots(api!, todo, pacerRef.current, onProgress, deepMax);
       setSnapshots((prev) => new Map([...prev, ...got]));
       return got;
     },
@@ -220,7 +225,16 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       for (const c of loaded.coverages) refs.add(c.deviceId);
       for (const w of loaded.workOrders) if (w.status !== "completed" && w.status !== "cancelled") refs.add(w.deviceId);
       for (const o of mcResult.orders) if (o.statusCode !== settings.statusCodeMap.completed && o.device?.id) refs.add(o.device.id);
-      await readReadings(Array.from(refs));
+      // The page is usable now; readings arrive in the background. Only the fleet-wide windows run here
+      // (a handful of calls) — vehicles silent for 14+ days are looked up on demand, not on every load.
+      setLoading(false);
+      setProgress({ text: "Reading odometer & engine hours fleet-wide…", pct: null });
+      try {
+        await readReadings(Array.from(refs), "Reading odometer & engine hours", 0);
+      } catch (e) {
+        // Orders and reminders are already on screen; only the due maths is missing.
+        if (seq === loadSeq.current) setNotice(`Couldn't read odometer / engine hours (${friendlyError(e)}) — reminders and warranty limits show as Unknown until you press Refresh.`);
+      }
       if (seq !== loadSeq.current) return;
       setReadingsDone(true);
     } catch (e) {
@@ -290,7 +304,26 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
     [syncOn, geotab.rules, geotab.jobs, scopedDevices, expand, geotabById, snapshots, settings]
   );
   const dueRows = useMemo(() => reminderRows.filter((r) => r.evaluation.state === "overdue" || r.evaluation.state === "due_soon"), [reminderRows]);
-  const readingsPending = useMemo(() => (readingsDone ? 0 : new Set(reminderRows.filter((r) => !snapshots.has(r.deviceId)).map((r) => r.deviceId)).size), [reminderRows, snapshots, readingsDone]);
+  /** Vehicles under a distance reminder that have a service on record but no odometer reading from the sweep. */
+  const quietVehicleIds = useMemo(
+    () => (readingsDone ? Array.from(new Set(reminderRows.filter((r) => r.rule.intervalMeters != null && r.lastDone && snapshots.get(r.deviceId)?.odometerMeters == null).map((r) => r.deviceId))) : []),
+    [reminderRows, snapshots, readingsDone]
+  );
+  const readingsPending = quietVehicleIds.length;
+
+  /** Per-vehicle lookups for vehicles the fleet-wide windows missed (capped; 2 calls each). */
+  const fetchQuietReadings = useCallback(async () => {
+    if (!insideMyGeotab || !quietVehicleIds.length) return;
+    const ids = quietVehicleIds.slice(0, DEEP_LOOKUP_MAX);
+    try {
+      const got = await fetchSnapshots(api!, ids, pacerRef.current, (text, pct) => setProgress({ text, pct }));
+      setSnapshots((prev) => new Map([...prev, ...got]));
+    } catch (e) {
+      setNotice(`Couldn't read the quiet vehicles: ${friendlyError(e)}`);
+    } finally {
+      setProgress(null);
+    }
+  }, [insideMyGeotab, api, quietVehicleIds]);
 
   // -------------------------------------------------------------------------
   // Intake refresh
@@ -538,7 +571,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
   const codeInput = (value: number, onChange: (n: number) => void) => <input className="mwo-input mwo-input-sm" type="number" min={0} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)} style={{ width: 72 }} />;
 
   return (
-    <div className="mwo-page">
+    <div className="mwo-page" ref={pageRef}>
       <div className="mwo-page-header">
         <div>
           <h2>Maintenance Work Orders</h2>
@@ -681,10 +714,10 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
       <div className="mwo-tabs-scroll">
         <Tabs
           tabs={[
-            { id: "orders", name: "Work orders", quantity: workOrders.filter((w) => w.status !== "completed" && w.status !== "cancelled").length },
-            { id: "attention", name: "Needs attention", quantity: (dvirRows?.filter((d) => !d.openWorkOrderKey).length ?? 0) + (faultRows?.filter((f) => !f.openWorkOrderKey).length ?? 0) + dueRows.filter((d) => !d.openWorkOrderId).length },
-            { id: "warranty", name: "Warranty", quantity: coverages.length },
-            { id: "reminders", name: "Reminders", quantity: geotab.rules.filter((r) => r.active).length },
+            { id: "orders", name: "Work orders", quantity: badge(workOrders.filter((w) => w.status !== "completed" && w.status !== "cancelled").length) },
+            { id: "attention", name: "Needs attention", quantity: badge((dvirRows?.filter((d) => !d.openWorkOrderKey).length ?? 0) + (faultRows?.filter((f) => !f.openWorkOrderKey).length ?? 0) + dueRows.filter((d) => !d.openWorkOrderId).length) },
+            { id: "warranty", name: "Warranty", quantity: badge(coverages.length) },
+            { id: "reminders", name: "Reminders", quantity: badge(geotab.rules.filter((r) => r.active).length) },
           ]}
           activeTabId={tab}
           onTabChange={(id) => setTab(id as MainTab)}
@@ -748,7 +781,7 @@ export default function App({ api, pageState: _pageState, focusNonce }: AppProps
             available={syncOn}
             error={geotab.error ?? (!settings.syncToGeotab ? "MyGeotab sync is switched off in Settings." : null)}
             readingsPending={readingsPending}
-            onReadReadings={() => void readReadings(reminderRows.map((r) => r.deviceId)).finally(() => setProgress(null))}
+            onReadReadings={() => void fetchQuietReadings()}
             onCreateWorkOrder={(row) => void startWorkOrder(row.deviceId, (wo) => fromReminder(wo, row.rule))}
             onOpenWorkOrder={openWorkOrder}
           />
